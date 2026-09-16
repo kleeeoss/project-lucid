@@ -1,4 +1,46 @@
-venv/
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Environment and Secrets (CRITICAL)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Go build artifacts & cache
+bin/
+dist/
+*.exe
+*.test
+*.out
+vendor/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python & Virtual Environments
 __pycache__/
-*.pyc
-.idea/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Docker data volume mounts
+postgres_data/
+localstack_data/
