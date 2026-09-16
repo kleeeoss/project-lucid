@@ -8,18 +8,27 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"lucid-ci/platform/models"
 )
 
-// WebhookHandler processes incoming GitHub App webhooks.
+// WebhookHandler processes incoming GitHub App webhooks and enqueues scan jobs.
 type WebhookHandler struct {
-	logger *slog.Logger
+	logger      *slog.Logger
+	secret      string
+	sqsProducer SQSProducer
 }
 
-func NewWebhookHandler(logger *slog.Logger) *WebhookHandler {
+func NewWebhookHandler(logger *slog.Logger, producer SQSProducer) *WebhookHandler {
+	secret := os.Getenv("GITHUB_WEBHOOK_SECRET")
+	if secret == "" {
+		logger.Warn("GITHUB_WEBHOOK_SECRET is not set; webhook signature verification will be skipped for development")
+	}
 	return &WebhookHandler{
-		logger: logger,
+		logger:      logger,
+		secret:      secret,
+		sqsProducer: producer,
 	}
 }
 
@@ -29,7 +38,7 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Limit payload to 10MB to prevent memory exhaustion
+	// Limit payload to 10MB to prevent memory exhaustion DDoS
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 
 	body, err := io.ReadAll(r.Body)
@@ -40,15 +49,28 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	// SEC-001 & SEC-002: Verify HMAC-SHA256 signature if secret is configured
+	if h.secret != "" {
+		sigHeader := r.Header.Get("X-Hub-Signature-256")
+		if err := VerifySignature(body, sigHeader, h.secret); err != nil {
+			h.logger.Warn("Unauthorized webhook delivery: signature verification failed",
+				"error", err,
+				"remote_addr", r.RemoteAddr,
+			)
+			http.Error(w, "Unauthorized: signature verification failed", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	eventType := r.Header.Get("X-GitHub-Event")
 	deliveryID := r.Header.Get("X-GitHub-Delivery")
 
-	h.logger.Info("Received GitHub webhook",
+	h.logger.Info("Received verified GitHub webhook",
 		"event_type", eventType,
 		"delivery_id", deliveryID,
 	)
 
-	// In Phase 1 mock: We only process pull_request events
+	// Process only pull_request events
 	if eventType != "pull_request" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -66,7 +88,7 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if this action triggers a scan
+	// Check if this action triggers a security scan
 	if !payload.IsValidPRAction() {
 		h.logger.Info("PR action ignored",
 			"action", payload.Action,
@@ -86,19 +108,31 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	taskID := generateUUID()
 	scanMessage := payload.ToSQSMessage(taskID)
 
-	h.logger.Info("Scan task created (Phase 1 mock queued)",
-		"task_id", taskID,
-		"repo", scanMessage.RepositoryName,
-		"pr", scanMessage.PRNumber,
-		"commit_sha", scanMessage.CommitSHA,
-	)
+	var messageID string
+	if h.sqsProducer != nil {
+		mid, err := h.sqsProducer.PublishScanTask(r.Context(), scanMessage)
+		if err != nil {
+			h.logger.Error("Failed to enqueue scan task to SQS",
+				"task_id", taskID,
+				"error", err,
+			)
+			http.Error(w, "Failed to enqueue scan job", http.StatusInternalServerError)
+			return
+		}
+		messageID = mid
+	} else {
+		h.logger.Info("SQS producer not configured, running in mock queue mode",
+			"task_id", taskID,
+		)
+	}
 
-	// Phase 1: Return 202 Accepted with the generated task_id
+	// Return 202 Accepted immediately to GitHub (< 300ms)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":     "queued",
 		"task_id":    taskID,
+		"message_id": messageID,
 		"repository": scanMessage.RepositoryName,
 		"pr_number":  scanMessage.PRNumber,
 		"commit_sha": scanMessage.CommitSHA,

@@ -12,11 +12,11 @@ type Router struct {
 	webhookHandler *WebhookHandler
 }
 
-func NewRouter(logger *slog.Logger) *Router {
+func NewRouter(logger *slog.Logger, producer SQSProducer) *Router {
 	r := &Router{
 		mux:            http.NewServeMux(),
 		logger:         logger,
-		webhookHandler: NewWebhookHandler(logger),
+		webhookHandler: NewWebhookHandler(logger, producer),
 	}
 	r.routes()
 	return r

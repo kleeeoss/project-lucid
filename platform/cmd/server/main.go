@@ -24,7 +24,24 @@ func main() {
 		port = "8080"
 	}
 
-	router := ingestion.NewRouter(logger)
+	queueURL := os.Getenv("SQS_QUEUE_URL")
+	var sqsProducer ingestion.SQSProducer
+
+	if queueURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		producer, err := ingestion.NewSQSProducer(ctx, queueURL, logger)
+		cancel()
+		if err != nil {
+			logger.Warn("Failed to initialize AWS SQS producer, continuing in mock queue mode", "error", err)
+		} else {
+			sqsProducer = producer
+			logger.Info("AWS SQS producer initialized successfully", "queue_url", queueURL)
+		}
+	} else {
+		logger.Info("SQS_QUEUE_URL not set; running with mock queue handler")
+	}
+
+	router := ingestion.NewRouter(logger, sqsProducer)
 
 	server := &http.Server{
 		Addr:              ":" + port,
@@ -35,7 +52,6 @@ func main() {
 		IdleTimeout:       30 * time.Second,
 	}
 
-	// Channel for graceful shutdown on SIGINT / SIGTERM
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
 
