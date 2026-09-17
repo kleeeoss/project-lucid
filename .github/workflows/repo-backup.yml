@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Clone source repository
         run: |
-          git clone --mirror \
+          git clone --bare \
             https://github.com/kleeeoss/project-lucid.git \
             lucid-backup.git
 
