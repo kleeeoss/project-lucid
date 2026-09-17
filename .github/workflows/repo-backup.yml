@@ -1,0 +1,29 @@
+name: Repository Backup
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: Mirror repository to backup
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Mirror repository
+        env:
+          backup_token: ${{ secrets.backup_token }}
+        run: |
+          git clone --mirror \
+            "https://x-access-token:${backup_token}@github.com/kleeeoss/project-lucid.git" \
+            lucid-backup.git
+
+          cd lucid-backup.git
+
+          git remote set-url --push origin \
+            "https://x-access-token:${backup_token}@github.com/kleeeoss/lucid-backup.git"
+
+          git push --mirror
