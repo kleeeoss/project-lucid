@@ -11,9 +11,11 @@ from models.schemas import (
     SandboxResult,
 )
 from service.remediation import RemediationPipeline
+from sandbox.orchestrator import SandboxOrchestrator
 
 router = APIRouter()
 pipeline = RemediationPipeline()
+orchestrator = SandboxOrchestrator()
 
 
 @router.get("/healthz", status_code=status.HTTP_200_OK)
@@ -45,16 +47,8 @@ async def remediate(request: RemediationRequest) -> RemediationResponse:
 )
 async def detonate(request: SandboxRequest) -> SandboxResult:
     """
-    Phase 1 Mock Implementation:
-    Returns clean mock execution results matching CTR-007.
-    (TASK-INF-205 connects this to real Docker/gVisor runner execution).
+    Production Dynamic Detonation Pipeline (TASK-INF-205):
+    Launches ephemeral container with --network none, memory/cpu limits,
+    enforces 60-second watchdog timeout, and guarantees complete cleanup.
     """
-    return SandboxResult(
-        scan_id=request.scan_id,
-        status="PASSED",
-        exit_code=0,
-        duration_ms=850,
-        stdout=f"Mock detonation completed cleanly for scan {request.scan_id}.\nTests passed: 1/1.\n",
-        stderr="",
-        network_egress_attempts=0,
-    )
+    return await orchestrator.detonate(request)

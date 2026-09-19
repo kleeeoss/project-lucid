@@ -66,7 +66,7 @@ def create_mock_remediation_response(
             "The PostgreSQL driver separates SQL code from user data, preventing command structure manipulation."
         ),
         confidence=0.95,
-        model_name="llama-3.1-8b-instant",
+        model_name="openai/gpt-oss-20b",
         tokens_used=245,
         inference_latency_ms=850,
     )

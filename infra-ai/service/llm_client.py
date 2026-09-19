@@ -46,8 +46,8 @@ class BaseLLMClient(ABC):
 # ============================================================================
 class GroqClient(BaseLLMClient):
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        self.api_key = api_key or settings.GROQ_API_KEY
-        self.model = model or settings.GROQ_MODEL
+        self.api_key = api_key if api_key is not None else settings.GROQ_API_KEY
+        self.model = model if model is not None else settings.GROQ_MODEL
         self._client: Optional[AsyncGroq] = None
 
     def _get_client(self) -> AsyncGroq:
@@ -95,8 +95,8 @@ class GroqClient(BaseLLMClient):
 # ============================================================================
 class GeminiClient(BaseLLMClient):
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        self.api_key = api_key or settings.GEMINI_API_KEY
-        self.model = model or settings.GEMINI_MODEL
+        self.api_key = api_key if api_key is not None else settings.GEMINI_API_KEY
+        self.model = model if model is not None else settings.GEMINI_MODEL
         self._configured = False
 
     def _setup(self):
@@ -147,8 +147,9 @@ class GeminiClient(BaseLLMClient):
 # ============================================================================
 class OllamaClient(BaseLLMClient):
     def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None):
-        self.base_url = (base_url or settings.OLLAMA_BASE_URL).rstrip("/")
-        self.model = model or settings.OLLAMA_MODEL
+        raw_url = base_url if base_url is not None else settings.OLLAMA_BASE_URL
+        self.base_url = raw_url.rstrip("/")
+        self.model = model if model is not None else settings.OLLAMA_MODEL
 
     async def generate(self, system_prompt: str, user_prompt: str) -> LLMResponse:
         start_time = time.perf_counter()

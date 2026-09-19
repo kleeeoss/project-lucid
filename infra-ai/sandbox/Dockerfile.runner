@@ -1,0 +1,42 @@
+# LUCID-CI — Ephemeral Dynamic Sandbox Runner Image
+# Designed for untrusted code execution under --network none, --read-only, and --cap-drop ALL.
+
+FROM node:20-bookworm-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    NODE_ENV=test
+
+# 1. Install Python 3, pip, git, and minimal build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ca-certificates \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Pre-install standard test runners (Node: jest; Python: pytest)
+# Using --break-system-packages for clean global runner in Debian 12
+RUN npm install -g jest && \
+    pip3 install --no-cache-dir --break-system-packages pytest
+
+# 3. Create unprivileged sandbox user (UID 10001, GID 10001)
+RUN groupadd -g 10001 sandboxgroup && \
+    useradd -u 10001 -g sandboxgroup -m -s /bin/bash sandboxuser
+
+# 4. Prepare workspace and temp directories
+WORKDIR /workspace
+RUN chown -R sandboxuser:sandboxgroup /workspace && \
+    chmod 777 /tmp
+
+# 5. Install entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# 6. Switch to unprivileged user permanently
+USER sandboxuser
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["npm", "test"]
