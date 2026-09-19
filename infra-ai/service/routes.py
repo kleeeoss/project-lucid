@@ -10,8 +10,10 @@ from models.schemas import (
     SandboxRequest,
     SandboxResult,
 )
+from service.remediation import RemediationPipeline
 
 router = APIRouter()
+pipeline = RemediationPipeline()
 
 
 @router.get("/healthz", status_code=status.HTTP_200_OK)
@@ -28,35 +30,11 @@ async def health_check():
 )
 async def remediate(request: RemediationRequest) -> RemediationResponse:
     """
-    Phase 1 Mock Implementation:
-    Returns a deterministic, correlated remediation response matching CTR-005.
-    (Phase 2 replaces this mock with live Groq / Gemini SLM inference).
+    Production Remediation Pipeline (TASK-INF-203):
+    Coordinates nonce prompt generation, LLM client with failover,
+    1-shot Pydantic validation retry, and deterministic fallback (BR-002).
     """
-    # Dynamic synthetic fix adapted to requested CWE
-    suggested_patch = (
-        "const query = 'SELECT * FROM users WHERE id = $1';\n"
-        "const user = await db.query(query, [userId]);"
-    )
-    explanation = (
-        f"Detected {request.cwe} in file using rule {request.rule_id}. "
-        f"Untrusted source '{request.source_info}' propagates directly into dangerous execution sink '{request.sink_info}'."
-    )
-    security_rationale = (
-        "Replaced dynamic string interpolation with parameterized query placeholders ($1). "
-        "Untrusted input is treated strictly as literal data by the database driver, neutralizing code injection."
-    )
-
-    return RemediationResponse(
-        scan_id=request.scan_id,
-        vulnerability_id=request.vulnerability_id,
-        suggested_patch=suggested_patch,
-        explanation=explanation,
-        security_rationale=security_rationale,
-        confidence=0.95,
-        model_name="mock-slm-phase1",
-        tokens_used=180,
-        inference_latency_ms=10,
-    )
+    return await pipeline.remediate(request)
 
 
 @router.post(
@@ -69,7 +47,7 @@ async def detonate(request: SandboxRequest) -> SandboxResult:
     """
     Phase 1 Mock Implementation:
     Returns clean mock execution results matching CTR-007.
-    (Phase 2 replaces this mock with real Docker/gVisor runner execution).
+    (TASK-INF-205 connects this to real Docker/gVisor runner execution).
     """
     return SandboxResult(
         scan_id=request.scan_id,

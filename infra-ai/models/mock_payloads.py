@@ -3,6 +3,7 @@ Mock payload factories for testing and cross-domain contract verification.
 """
 
 import uuid
+from typing import Optional, Dict
 from models.schemas import (
     RemediationRequest,
     RemediationResponse,
@@ -12,10 +13,11 @@ from models.schemas import (
 
 
 def create_mock_remediation_request(
-    scan_id: str = None,
-    vulnerability_id: str = None,
+    scan_id: Optional[str] = None,
+    vulnerability_id: Optional[str] = None,
     cwe: str = "CWE-89",
     rule_id: str = "LUCID-SEC-001",
+    nonce: Optional[str] = "a1b2c3d4e5f67890",
 ) -> RemediationRequest:
     return RemediationRequest(
         scan_id=scan_id or str(uuid.uuid4()),
@@ -40,13 +42,13 @@ def create_mock_remediation_request(
             "query (String template concatenation)",
             "db.query(query) (Sink: SQL injection)"
         ],
-        nonce="a1b2c3d4e5f67890",
+        nonce=nonce,
     )
 
 
 def create_mock_remediation_response(
-    scan_id: str = None,
-    vulnerability_id: str = None,
+    scan_id: Optional[str] = None,
+    vulnerability_id: Optional[str] = None,
 ) -> RemediationResponse:
     return RemediationResponse(
         scan_id=scan_id or str(uuid.uuid4()),
@@ -71,8 +73,8 @@ def create_mock_remediation_response(
 
 
 def create_mock_sandbox_request(
-    scan_id: str = None,
-    files: dict = None,
+    scan_id: Optional[str] = None,
+    files: Optional[Dict[str, str]] = None,
 ) -> SandboxRequest:
     return SandboxRequest(
         scan_id=scan_id or str(uuid.uuid4()),
@@ -87,7 +89,7 @@ def create_mock_sandbox_request(
 
 
 def create_mock_sandbox_result(
-    scan_id: str = None,
+    scan_id: Optional[str] = None,
     status: str = "PASSED",
 ) -> SandboxResult:
     return SandboxResult(

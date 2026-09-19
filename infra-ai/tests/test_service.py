@@ -31,16 +31,16 @@ def test_remediate_endpoint_success():
     data = response.json()
     assert data["scan_id"] == "scan-uuid-12345"
     assert data["vulnerability_id"] == "vuln-uuid-67890"
+    # Even without live API keys set in test environment, it falls back cleanly to CTR-005 (BR-002)
     assert "CWE-89" in data["explanation"]
-    assert data["confidence"] == 0.95
-    assert data["model_name"] == "mock-slm-phase1"
+    assert "suggested_patch" in data
+    assert 0.0 <= data["confidence"] <= 1.0
 
 
 def test_remediate_endpoint_validation_error():
-    # Send malformed payload (missing vulnerable_code, invalid language)
     bad_payload = {
         "scan_id": "scan-123",
-        "language": "ruby",  # invalid
+        "language": "ruby",  # invalid language
     }
     response = client.post("/remediate", json=bad_payload)
     assert response.status_code == 422
