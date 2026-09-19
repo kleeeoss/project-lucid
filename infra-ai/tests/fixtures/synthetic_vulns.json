@@ -1,0 +1,152 @@
+[
+  {
+    "scan_id": "test-scan-sqli-js",
+    "vulnerability_id": "vuln-sqli-js-001",
+    "rule_id": "LUCID-SEC-001",
+    "cwe": "CWE-89",
+    "language": "javascript",
+    "vulnerable_code": "const query = `SELECT * FROM users WHERE email = '${req.body.email}'`;",
+    "surrounding_context": "app.post('/login', async (req, res) => {\n  const query = `SELECT * FROM users WHERE email = '${req.body.email}'`;\n  const user = await db.query(query);\n  res.json(user);\n});",
+    "source_info": "req.body.email (Express Body Parser)",
+    "sink_info": "db.query() (PostgreSQL Client)",
+    "taint_path_summary": [
+      "req.body.email (Source)",
+      "query = `SELECT...` (Template Literal)",
+      "db.query(query) (Sink)"
+    ]
+  },
+  {
+    "scan_id": "test-scan-sqli-py",
+    "vulnerability_id": "vuln-sqli-py-002",
+    "rule_id": "LUCID-SEC-001",
+    "cwe": "CWE-89",
+    "language": "python",
+    "vulnerable_code": "cursor.execute(f\"SELECT * FROM accounts WHERE id = '{account_id}'\")",
+    "surrounding_context": "def get_account(account_id):\n    conn = sqlite3.connect('app.db')\n    cursor = conn.cursor()\n    cursor.execute(f\"SELECT * FROM accounts WHERE id = '{account_id}'\")\n    return cursor.fetchone()",
+    "source_info": "request.args.get('id') (Flask Query Param)",
+    "sink_info": "cursor.execute() (Python DB-API)",
+    "taint_path_summary": [
+      "account_id = request.args.get('id')",
+      "cursor.execute(f\"SELECT...\")"
+    ]
+  },
+  {
+    "scan_id": "test-scan-cmdi-js",
+    "vulnerability_id": "vuln-cmdi-js-003",
+    "rule_id": "LUCID-SEC-002",
+    "cwe": "CWE-78",
+    "language": "javascript",
+    "vulnerable_code": "exec(`ping -c 1 ${req.query.host}`, (err, stdout) => { ... });",
+    "surrounding_context": "const { exec } = require('child_process');\napp.get('/ping', (req, res) => {\n  exec(`ping -c 1 ${req.query.host}`, (err, stdout) => {\n    res.send(stdout);\n  });\n});",
+    "source_info": "req.query.host (URL Query Parameter)",
+    "sink_info": "child_process.exec() (OS Command Shell)",
+    "taint_path_summary": [
+      "req.query.host",
+      "exec(`ping ... ${req.query.host}`)"
+    ]
+  },
+  {
+    "scan_id": "test-scan-cmdi-py",
+    "vulnerability_id": "vuln-cmdi-py-004",
+    "rule_id": "LUCID-SEC-002",
+    "cwe": "CWE-78",
+    "language": "python",
+    "vulnerable_code": "subprocess.Popen(f\"cat {filename}\", shell=True)",
+    "surrounding_context": "import subprocess\ndef display_file(filename):\n    proc = subprocess.Popen(f\"cat {filename}\", shell=True, stdout=subprocess.PIPE)\n    return proc.communicate()[0]",
+    "source_info": "filename = request.form['file']",
+    "sink_info": "subprocess.Popen(shell=True)",
+    "taint_path_summary": [
+      "request.form['file']",
+      "subprocess.Popen(..., shell=True)"
+    ]
+  },
+  {
+    "scan_id": "test-scan-path-js",
+    "vulnerability_id": "vuln-path-js-005",
+    "rule_id": "LUCID-SEC-004",
+    "cwe": "CWE-22",
+    "language": "javascript",
+    "vulnerable_code": "const data = fs.readFileSync(path.join('/var/www/uploads', req.query.file));",
+    "surrounding_context": "const fs = require('fs');\nconst path = require('path');\napp.get('/download', (req, res) => {\n  const data = fs.readFileSync(path.join('/var/www/uploads', req.query.file));\n  res.send(data);\n});",
+    "source_info": "req.query.file (Query Param)",
+    "sink_info": "fs.readFileSync() (Filesystem Read)",
+    "taint_path_summary": [
+      "req.query.file",
+      "path.join('/var/www/uploads', req.query.file)",
+      "fs.readFileSync()"
+    ]
+  },
+  {
+    "scan_id": "test-scan-path-py",
+    "vulnerability_id": "vuln-path-py-006",
+    "rule_id": "LUCID-SEC-004",
+    "cwe": "CWE-22",
+    "language": "python",
+    "vulnerable_code": "with open(f\"/data/reports/{user_file}\", 'r') as f:",
+    "surrounding_context": "def read_report(user_file):\n    with open(f\"/data/reports/{user_file}\", 'r') as f:\n        return f.read()",
+    "source_info": "user_file = request.json.get('filename')",
+    "sink_info": "open() (File Descriptor)",
+    "taint_path_summary": [
+      "request.json.get('filename')",
+      "open(f\"/data/reports/{user_file}\")"
+    ]
+  },
+  {
+    "scan_id": "test-scan-secret-js",
+    "vulnerability_id": "vuln-secret-js-007",
+    "rule_id": "LUCID-SEC-003",
+    "cwe": "CWE-798",
+    "language": "javascript",
+    "vulnerable_code": "const STRIPE_SECRET_KEY = 'STRIPE_TEST_SECRET_PLACEHOLDER';",
+    "surrounding_context": "const stripe = require('stripe');\nconst STRIPE_SECRET_KEY = 'STRIPE_TEST_SECRET_PLACEHOLDER';\nconst client = stripe(STRIPE_SECRET_KEY);",
+    "source_info": "Hardcoded String Literal",
+    "sink_info": "stripe(STRIPE_SECRET_KEY)",
+    "taint_path_summary": [
+      "Hardcoded string credential assigned to STRIPE_SECRET_KEY"
+    ]
+  },
+  {
+    "scan_id": "test-scan-secret-py",
+    "vulnerability_id": "vuln-secret-py-008",
+    "rule_id": "LUCID-SEC-003",
+    "cwe": "CWE-798",
+    "language": "python",
+    "vulnerable_code": "AWS_SECRET_ACCESS_KEY = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'",
+    "surrounding_context": "import boto3\nAWS_SECRET_ACCESS_KEY = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'\ns3 = boto3.client('s3', aws_secret_access_key=AWS_SECRET_ACCESS_KEY)",
+    "source_info": "Hardcoded String Literal",
+    "sink_info": "boto3.client('s3')",
+    "taint_path_summary": [
+      "Hardcoded IAM secret credential assigned to AWS_SECRET_ACCESS_KEY"
+    ]
+  },
+  {
+    "scan_id": "test-scan-eval-js",
+    "vulnerability_id": "vuln-eval-js-009",
+    "rule_id": "LUCID-SEC-005",
+    "cwe": "CWE-95",
+    "language": "javascript",
+    "vulnerable_code": "const result = eval(`(${req.body.calculation})`);",
+    "surrounding_context": "app.post('/calc', (req, res) => {\n  const result = eval(`(${req.body.calculation})`);\n  res.json({ result });\n});",
+    "source_info": "req.body.calculation (Untrusted Expression)",
+    "sink_info": "eval() (Dynamic JS Code Execution)",
+    "taint_path_summary": [
+      "req.body.calculation",
+      "eval(`(${req.body.calculation})`)"
+    ]
+  },
+  {
+    "scan_id": "test-scan-eval-py",
+    "vulnerability_id": "vuln-eval-py-010",
+    "rule_id": "LUCID-SEC-005",
+    "cwe": "CWE-95",
+    "language": "python",
+    "vulnerable_code": "value = eval(request.args.get('expr'))",
+    "surrounding_context": "from flask import Flask, request\napp = Flask(__name__)\n@app.route('/compute')\ndef compute():\n    value = eval(request.args.get('expr'))\n    return str(value)",
+    "source_info": "request.args.get('expr') (Untrusted Input)",
+    "sink_info": "eval() (Python Dynamic Interpreter)",
+    "taint_path_summary": [
+      "request.args.get('expr')",
+      "eval(...)"
+    ]
+  }
+]
