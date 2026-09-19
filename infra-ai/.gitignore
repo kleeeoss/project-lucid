@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment configuration & secrets (CRITICAL: Never commit API keys)
+.env
+.env.*
+!.env.example
+
+# PyCharm / IDE metadata
+.idea/
+
+# Ephemeral dynamic sandbox artifacts
+/sandbox/tmp/
+/sandbox/workspaces/
+*.tar.gz
