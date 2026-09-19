@@ -1,0 +1,27 @@
+FROM golang:bookworm AS builder
+
+WORKDIR /app
+
+# Copy platform go.mod and go.sum for caching
+COPY platform/go.mod platform/go.sum ./platform/
+WORKDIR /app/platform
+RUN go mod download
+
+# Copy all platform source code
+WORKDIR /app
+COPY platform/ ./platform/
+
+# Build static server binary
+WORKDIR /app/platform
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/server cmd/server/main.go
+
+# Production minimal runtime
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /bin/server /bin/server
+
+EXPOSE 8080
+ENV PORT=8080
+
+CMD ["/bin/server"]

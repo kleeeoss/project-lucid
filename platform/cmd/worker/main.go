@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -26,6 +27,7 @@ func main() {
 
 	logger.Info("Initializing Lucid-CI Platform Worker Daemon")
 
+	// 1. Concurrency configuration
 	concurrency := 3
 	if cStr := os.Getenv("WORKER_CONCURRENCY"); cStr != "" {
 		if c, err := strconv.Atoi(cStr); err == nil && c > 0 {
@@ -35,14 +37,16 @@ func main() {
 
 	queueURL := os.Getenv("SQS_QUEUE_URL")
 	databaseURL := os.Getenv("DATABASE_URL")
+	aiServiceURL := os.Getenv("AI_SERVICE_URL")
 
+	// 2. Database Store Connection
 	var store db.Store
 	if databaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		s, err := db.NewStore(ctx, databaseURL)
 		cancel()
 		if err != nil {
-			logger.Warn("Database connection failed, running worker in memory mode", "error", err)
+			logger.Warn("Database connection failed, worker continuing in memory mode", "error", err)
 		} else {
 			store = s
 			defer store.Close()
@@ -50,6 +54,11 @@ func main() {
 		}
 	}
 
+	// 3. Initialize AI & Sandbox Clients (Garv's microservice)
+	aiClient := worker.NewAIClient(aiServiceURL, logger)
+	sandboxClient := worker.NewSandboxClient(aiServiceURL, logger)
+
+	// 4. AWS SQS Client Initialization
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion("us-east-1"))
 	cancel()
@@ -69,16 +78,82 @@ func main() {
 		}
 	})
 
+	// 5. Orchestration Pipeline Handler (TASK-PLT-301, 302, 303)
 	pipelineHandler := func(ctx context.Context, task models.ScanTaskMessage) error {
-		logger.Info("Executing analysis pipeline for task",
+		logger.Info("Starting end-to-end scan pipeline orchestration",
 			"task_id", task.TaskID,
 			"repo", task.RepositoryName,
 			"pr", task.PRNumber,
+			"commit", task.CommitSHA,
 		)
-		time.Sleep(100 * time.Millisecond)
+
+		// Record Scan Run in PostgreSQL
+		if store != nil {
+			repo := &models.Repository{
+				ID:             task.RepositoryID,
+				FullName:       task.RepositoryName,
+				InstallationID: task.InstallationID,
+				DefaultBranch:  "main",
+			}
+			if err := store.UpsertRepository(ctx, repo); err != nil {
+				logger.Warn("Failed to upsert repository", "error", err)
+			}
+
+			scanRun := &models.ScanRun{
+				RepositoryID:  task.RepositoryID,
+				PRNumber:      task.PRNumber,
+				CommitSHA:     task.CommitSHA,
+				Status:        models.ScanStatusScanning,
+				FindingsCount: 0,
+			}
+			if err := store.CreateScanRun(ctx, scanRun); err != nil {
+				logger.Warn("Failed to create scan run record", "error", err)
+			} else {
+				logger.Info("Created scan_run in PostgreSQL", "scan_id", scanRun.ID)
+			}
+		}
+
+		// AI Remediation Hook (Fail-Open BR-002: Failures in AI do NOT block PR)
+		remReq := worker.RemediationRequest{
+			ScanID:          task.TaskID,
+			VulnerabilityID: fmt.Sprintf("vuln-%s", task.TaskID[:8]),
+			RuleID:          "LUCID-SEC-001",
+			CWE:             "CWE-89",
+			Language:        "javascript",
+			VulnerableCode:  "db.query(`SELECT * FROM users WHERE id = '${userId}'`)",
+		}
+		remResp, err := aiClient.RemediateVulnerability(ctx, remReq)
+		if err != nil {
+			logger.Warn("AI Remediation skipped or timed out (Fail-Open BR-002 active)", "error", err)
+		} else {
+			logger.Info("AI Remediation generated patch successfully",
+				"model", remResp.ModelName,
+				"confidence", remResp.Confidence,
+			)
+		}
+
+		// Dynamic Sandbox Detonation Hook (CTR-006 / CTR-007)
+		sandboxReq := worker.SandboxRequest{
+			ScanID:         task.TaskID,
+			CommitSHA:      task.CommitSHA,
+			Language:       "javascript",
+			BuildCommand:   "npm test",
+			TimeoutSeconds: 60, // Standardized 60s container timeout
+		}
+		sandboxResult, err := sandboxClient.Detonate(ctx, sandboxReq)
+		if err != nil {
+			logger.Warn("Sandbox detonation skipped or offline", "error", err)
+		} else {
+			logger.Info("Sandbox detonation executed",
+				"status", sandboxResult.Status,
+				"exit_code", sandboxResult.ExitCode,
+			)
+		}
+
 		return nil
 	}
 
+	// 6. Launch Worker Pool
 	pool := worker.NewPool(sqsClient, queueURL, store, concurrency, logger, pipelineHandler)
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
@@ -96,7 +171,7 @@ func main() {
 	if queueURL != "" {
 		pool.Start(workerCtx)
 	} else {
-		logger.Info("SQS_QUEUE_URL not configured. Worker daemon standing by in idle mode.")
+		logger.Info("SQS_QUEUE_URL not configured. Worker standing by in idle mode.")
 		<-workerCtx.Done()
 	}
 }
