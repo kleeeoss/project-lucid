@@ -1,0 +1,92 @@
+services:
+  # 1. PostgreSQL 16
+  postgres:
+    image: postgres:16-alpine
+    container_name: lucid-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lucid_ci
+      POSTGRES_USER: lucid_user
+      POSTGRES_PASSWORD: lucid_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./platform/db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U lucid_user -d lucid_ci" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lucid-net
+
+  # 2. LocalStack (Community 3.8.1 — No account or license token required)
+  localstack:
+    image: localstack/localstack:3.8.1
+    container_name: lucid-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sqs
+      - DEFAULT_REGION=us-east-1
+    volumes:
+      - ./scripts/localstack:/etc/localstack/init/ready.d:ro
+    networks:
+      - lucid-net
+
+  # 3. Platform HTTP Server (Ingestion)
+  platform-server:
+    build:
+      context: .
+      dockerfile: platform/Dockerfile.server
+    container_name: lucid-platform-server
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      - PORT=8080
+      - LOG_LEVEL=info
+      - GITHUB_WEBHOOK_SECRET=dev_webhook_secret_12345
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/lucid-ci-scan-queue
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_started
+    networks:
+      - lucid-net
+
+  # 4. Platform Background Worker Daemon
+  platform-worker:
+    build:
+      context: .
+      dockerfile: platform/Dockerfile.worker
+    container_name: lucid-platform-worker
+    restart: unless-stopped
+    environment:
+      - WORKER_CONCURRENCY=3
+      - LOG_LEVEL=info
+      - DATABASE_URL=postgres://lucid_user:lucid_password@postgres:5432/lucid_ci?sslmode=disable
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/lucid-ci-scan-queue
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AI_SERVICE_URL=http://ai-service:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+    networks:
+      - lucid-net
+
+volumes:
+  postgres_data:
+
+networks:
+  lucid-net:
+    driver: bridge

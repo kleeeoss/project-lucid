@@ -1,0 +1,20 @@
+{
+    "action": "opened",
+    "number": 42,
+    "pull_request": {
+        "head": {
+            "sha": "6dcb09b5"
+        },
+        "base": {
+            "sha": "f95f269d"
+        },
+        "diff_url": "https://github.com/diff"
+    },
+    "repository": {
+        "id": 12345,
+        "full_name": "acme/lucid-ci"
+    },
+    "installation": {
+        "id": 98765
+    }
+}
