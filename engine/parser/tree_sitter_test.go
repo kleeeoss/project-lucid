@@ -52,6 +52,48 @@ func TestJavaScriptParserHandlesMalformedSource(t *testing.T) {
 	}
 }
 
+func TestPythonParserParsesValidSource(t *testing.T) {
+	p, err := NewPythonParser()
+	if err != nil {
+		t.Fatalf("new python parser: %v", err)
+	}
+	defer p.Close()
+
+	tree, err := p.Parse([]byte("def handler(request):\n    name = request.args.get('name')\n    return name\n"))
+	if err != nil {
+		t.Fatalf("parse python: %v", err)
+	}
+	defer tree.Close()
+
+	root, err := tree.Root()
+	if err != nil {
+		t.Fatalf("root: %v", err)
+	}
+	if root.Kind != "module" {
+		t.Fatalf("python root kind = %q, want module", root.Kind)
+	}
+	if root.HasError {
+		t.Fatalf("valid python source should not contain errors: %+v", root)
+	}
+}
+
+func TestPythonParserHandlesMalformedSource(t *testing.T) {
+	p, err := NewPythonParser()
+	if err != nil {
+		t.Fatalf("new python parser: %v", err)
+	}
+	defer p.Close()
+
+	tree, err := p.Parse([]byte("def broken(:\n    return"))
+	if err != nil {
+		t.Fatalf("malformed python should still return a tree: %v", err)
+	}
+	defer tree.Close()
+	if !tree.HasError() {
+		t.Fatalf("malformed python input should be represented by ERROR nodes")
+	}
+}
+
 func TestParserLifecycleRejectsUseAfterClose(t *testing.T) {
 	p, err := NewJavaScriptParser()
 	if err != nil {
@@ -82,7 +124,7 @@ func TestTreeLifecycleRejectsUseAfterClose(t *testing.T) {
 }
 
 func TestUnsupportedLanguageFails(t *testing.T) {
-	if _, err := NewParser(Language("python")); err == nil {
-		t.Fatalf("phase 1 parser should reject unsupported language until registry is implemented")
+	if _, err := NewParser(Language("ruby")); err == nil {
+		t.Fatalf("expected unsupported language to fail")
 	}
 }

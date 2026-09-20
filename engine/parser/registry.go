@@ -14,6 +14,7 @@ type LanguageSpec struct {
 
 var registry = []LanguageSpec{
 	{Language: LanguageJavaScript, Name: "javascript", Extensions: []string{".js", ".jsx", ".ts"}},
+	{Language: LanguagePython, Name: "python", Extensions: []string{".py"}},
 }
 
 func DetectLanguage(path string) (LanguageSpec, error) {

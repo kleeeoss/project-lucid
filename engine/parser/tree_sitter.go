@@ -7,12 +7,14 @@ import (
 
 	treesitter "github.com/tree-sitter/go-tree-sitter"
 	tsjavascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
+	tspython "github.com/tree-sitter/tree-sitter-python/bindings/go"
 )
 
 type Language string
 
 const (
 	LanguageJavaScript Language = "javascript"
+	LanguagePython     Language = "python"
 )
 
 type Parser struct {
@@ -45,15 +47,25 @@ func NewJavaScriptParser() (*Parser, error) {
 	return NewParser(LanguageJavaScript)
 }
 
+func NewPythonParser() (*Parser, error) {
+	return NewParser(LanguagePython)
+}
+
 func NewParser(language Language) (*Parser, error) {
-	if language != LanguageJavaScript {
+	var tsLanguage *treesitter.Language
+	switch language {
+	case LanguageJavaScript:
+		tsLanguage = treesitter.NewLanguage(tsjavascript.Language())
+	case LanguagePython:
+		tsLanguage = treesitter.NewLanguage(tspython.Language())
+	default:
 		return nil, fmt.Errorf("unsupported parser language %q", language)
 	}
 	inner := treesitter.NewParser()
 	if inner == nil {
 		return nil, errors.New("tree-sitter returned a nil parser")
 	}
-	if err := inner.SetLanguage(treesitter.NewLanguage(tsjavascript.Language())); err != nil {
+	if err := inner.SetLanguage(tsLanguage); err != nil {
 		inner.Close()
 		return nil, fmt.Errorf("set %s grammar: %w", language, err)
 	}
