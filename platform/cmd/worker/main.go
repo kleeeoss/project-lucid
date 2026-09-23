@@ -123,7 +123,7 @@ func main() {
 			}
 		}
 
-		// Record initial Scan Run in PostgreSQL
+		// Record initial Scan Run in PostgreSQL using task.TaskID as scanRun.ID
 		var scanRun *models.ScanRun
 		if store != nil {
 			repo := &models.Repository{
@@ -135,6 +135,7 @@ func main() {
 			_ = store.UpsertRepository(ctx, repo)
 
 			scanRun = &models.ScanRun{
+				ID:            task.TaskID,
 				RepositoryID:  task.RepositoryID,
 				PRNumber:      task.PRNumber,
 				CommitSHA:     task.CommitSHA,
@@ -144,24 +145,29 @@ func main() {
 			}
 			if err := store.CreateScanRun(ctx, scanRun); err != nil {
 				logger.Warn("Failed to create scan run record in database", "error", err)
+			} else {
+				logger.Info("Created scan_run in PostgreSQL", "scan_id", scanRun.ID)
 			}
 		}
 
-		// Static Analysis & AI Remediation Hook
+		// Static Analysis Finding Metadata
 		findingRuleID := "LUCID-SEC-001"
 		findingCWE := "CWE-89"
 		findingFilePath := "src/controllers/auth.js"
 		findingLine := 42
 
+		// Construct AI Remediation Request strictly conforming to CTR-004
 		remReq := worker.RemediationRequest{
-			ScanID:          task.TaskID,
-			VulnerabilityID: fmt.Sprintf("vuln-%s", task.TaskID[:8]),
-			RuleID:          findingRuleID,
-			CWE:             findingCWE,
-			Language:        "javascript",
-			VulnerableCode:  "db.query(`SELECT * FROM users WHERE id = '${userId}'`)",
-			FilePath:        findingFilePath,
-			LineStart:       findingLine,
+			ScanID:             task.TaskID,
+			VulnerabilityID:    fmt.Sprintf("vuln-%s", task.TaskID[:8]),
+			RuleID:             findingRuleID,
+			CWE:                findingCWE,
+			Language:           "javascript",
+			VulnerableCode:     "db.query(`SELECT * FROM users WHERE id = '${userId}'`)",
+			SurroundingContext: "function getUser(req) {\n  const userId = req.query.id;\n  db.query(`SELECT * FROM users WHERE id = '${userId}'`);\n}",
+			SourceInfo:         "req.query.id (Source: HTTP query parameter)",
+			SinkInfo:           "db.query (Sink: Database query execution)",
+			TaintPathSummary:   []string{"req.query.id", "userId", "db.query"},
 		}
 
 		var suggestedPatch string
@@ -206,7 +212,12 @@ func main() {
 				AIExplanation:      &explanation,
 				SandboxVerified:    sandboxVerified,
 			}
-			_ = store.InsertVulnerabilities(ctx, scanRun.ID, []models.Vulnerability{vulnRecord})
+			if err := store.InsertVulnerabilities(ctx, scanRun.ID, []models.Vulnerability{vulnRecord}); err != nil {
+				logger.Error("Failed to insert vulnerabilities", "scan_id", scanRun.ID, "error", err)
+			} else {
+				logger.Info("Inserted vulnerability finding in PostgreSQL", "scan_id", scanRun.ID, "rule_id", findingRuleID)
+				scanRun.FindingsCount = 1
+			}
 		}
 
 		// Publish GitHub Feedback (Check Run Completion & PR Review Comment)
@@ -229,7 +240,6 @@ func main() {
 			}
 			_ = checkRunClient.UpdateCheckRun(ctx, token, owner, repoName, checkRunID, "failure", output)
 
-			// Post PR inline suggestion comment if patch exists
 			if suggestedPatch != "" {
 				commentBody := fmt.Sprintf("### 🛡️ Lucid-CI Security Finding: %s\n\n**Issue:** %s\n\n```suggestion\n%s\n```",
 					findingCWE, explanation, suggestedPatch)

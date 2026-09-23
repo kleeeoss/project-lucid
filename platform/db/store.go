@@ -107,15 +107,16 @@ func (s *pgStore) GetRepositoryByID(ctx context.Context, id int64) (*models.Repo
 func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error {
 	query := `
 		INSERT INTO scan_runs (id, repository_id, pr_number, commit_sha, status, findings_count, started_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())
+		VALUES (COALESCE(NULLIF($6, '')::uuid, gen_random_uuid()), $1, $2, $3, $4::scan_status, $5, NOW())
 		RETURNING id, started_at;
 	`
 	err := s.pool.QueryRow(ctx, query,
 		scan.RepositoryID,
 		scan.PRNumber,
 		scan.CommitSHA,
-		scan.Status,
+		string(scan.Status),
 		scan.FindingsCount,
+		scan.ID,
 	).Scan(&scan.ID, &scan.StartedAt)
 	if err != nil {
 		return fmt.Errorf("CreateScanRun: %w", err)
@@ -126,13 +127,13 @@ func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error
 func (s *pgStore) UpdateScanRunStatus(ctx context.Context, scanID string, status models.ScanStatus, findingsCount int, durationMs *int) error {
 	query := `
 		UPDATE scan_runs
-		SET status = $1,
+		SET status = $1::scan_status,
 		    findings_count = $2,
 		    scan_duration_ms = $3,
-		    completed_at = CASE WHEN $1 IN ('COMPLETED', 'FAILED') THEN NOW() ELSE completed_at END
-		WHERE id = $4;
+		    completed_at = CASE WHEN $1::text IN ('COMPLETED', 'FAILED') THEN NOW() ELSE completed_at END
+		WHERE id = $4::uuid;
 	`
-	tag, err := s.pool.Exec(ctx, query, status, findingsCount, durationMs, scanID)
+	tag, err := s.pool.Exec(ctx, query, string(status), findingsCount, durationMs, scanID)
 	if err != nil {
 		return fmt.Errorf("UpdateScanRunStatus: %w", err)
 	}
@@ -146,7 +147,7 @@ func (s *pgStore) UpdateCheckRunID(ctx context.Context, scanID string, checkRunI
 	query := `
 		UPDATE scan_runs
 		SET check_run_id = $1
-		WHERE id = $2;
+		WHERE id = $2::uuid;
 	`
 	_, err := s.pool.Exec(ctx, query, checkRunID, scanID)
 	if err != nil {
@@ -160,7 +161,7 @@ func (s *pgStore) GetScanRunByID(ctx context.Context, scanID string) (*models.Sc
 		SELECT id, repository_id, pr_number, commit_sha, status, check_run_id,
 		       findings_count, scan_duration_ms, started_at, completed_at
 		FROM scan_runs
-		WHERE id = $1;
+		WHERE id = $1::uuid;
 	`
 	var scan models.ScanRun
 	err := s.pool.QueryRow(ctx, query, scanID).Scan(
@@ -189,7 +190,6 @@ func (s *pgStore) InsertVulnerabilities(ctx context.Context, scanID string, vuln
 		return nil
 	}
 
-	// Use pgx.CopyFrom for high-throughput batch insert
 	rows := make([][]any, len(vulns))
 	for i, v := range vulns {
 		rows[i] = []any{
@@ -249,7 +249,7 @@ func (s *pgStore) GetVulnerabilitiesByScanRunID(ctx context.Context, scanID stri
 		       ai_remediation_patch, ai_explanation, sandbox_verified,
 		       ast_graph_json, created_at
 		FROM vulnerabilities
-		WHERE scan_run_id = $1
+		WHERE scan_run_id = $1::uuid
 		ORDER BY line_start ASC;
 	`
 	rows, err := s.pool.Query(ctx, query, scanID)
