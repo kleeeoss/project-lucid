@@ -2,17 +2,24 @@ FROM golang:bookworm AS builder
 
 WORKDIR /app
 
+# Copy root workspace and module files for caching
+COPY go.work ./
+COPY engine/go.mod engine/go.sum ./engine/
 COPY platform/go.mod platform/go.sum ./platform/
+
 WORKDIR /app/platform
 RUN go mod download
 
+# Copy full source code for both modules
 WORKDIR /app
+COPY engine/ ./engine/
 COPY platform/ ./platform/
 
+# Compile static binary with Cgo enabled for Tree-sitter
 WORKDIR /app/platform
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/worker cmd/worker/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -o /bin/worker cmd/worker/main.go
 
-# Production minimal runtime
+# Minimal production runtime
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 

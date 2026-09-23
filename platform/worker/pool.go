@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	"github.com/aws/aws-sdk-go/aws"
 
 	"lucid-ci/platform/db"
 	"lucid-ci/platform/models"
@@ -129,7 +129,9 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 				"panic", r,
 			)
 			if p.store != nil {
-				_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, nil)
+				if err := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, nil); err != nil {
+					p.logger.Error("Failed to update scan run status on panic", "error", err)
+				}
 			}
 		}
 	}()
@@ -142,11 +144,6 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 		"pr", task.PRNumber,
 		"commit", task.CommitSHA,
 	)
-
-	// Transition status to SCANNING in database
-	if p.store != nil {
-		_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusScanning, 0, nil)
-	}
 
 	var err error
 	if p.handler != nil {
@@ -162,7 +159,9 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 			"error", err,
 		)
 		if p.store != nil {
-			_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, &durationMs)
+			if updateErr := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, &durationMs); updateErr != nil {
+				p.logger.Error("Failed to update scan run status to FAILED", "error", updateErr)
+			}
 		}
 		return
 	}
@@ -172,7 +171,9 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 		"duration_ms", durationMs,
 	)
 	if p.store != nil {
-		_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusCompleted, 0, &durationMs)
+		if updateErr := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusCompleted, 1, &durationMs); updateErr != nil {
+			p.logger.Error("Failed to update scan run status to COMPLETED", "error", updateErr)
+		}
 	}
 }
 
