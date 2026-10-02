@@ -14,13 +14,13 @@ test-platform:
 
 # Python AI Service Unit Testing
 test:
-	@cd infra-ai && pytest -v
+	@cd infra-ai && ( [ -f .venv/bin/pytest ] && .venv/bin/pytest -v || pytest -v )
 
 test-schemas:
-	@cd infra-ai && pytest -v tests/test_schemas.py
+	@cd infra-ai && ( [ -f .venv/bin/pytest ] && .venv/bin/pytest -v tests/test_schemas.py || pytest -v tests/test_schemas.py )
 
 test-pipeline:
-	@cd infra-ai && pytest -v tests/test_remediation_pipeline.py
+	@cd infra-ai && ( [ -f .venv/bin/pytest ] && .venv/bin/pytest -v tests/test_remediation_pipeline.py || pytest -v tests/test_remediation_pipeline.py )
 
 test-local:
 	@bash scripts/test_e2e_local.sh

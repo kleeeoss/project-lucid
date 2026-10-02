@@ -76,4 +76,3 @@ if ($ElapsedSec -gt 30) {
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host "   PASS: PHASE 3 GATE 3 LOCAL PIPELINE FULLY VERIFIED!   " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
-exit 0
