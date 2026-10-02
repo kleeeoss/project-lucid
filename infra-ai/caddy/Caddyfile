@@ -1,0 +1,42 @@
+# LUCID-CI — Production Caddy Configuration
+# Syntax: {$DOMAIN::80}
+# • If $DOMAIN is set (e.g. lucid-demo.duckdns.org): binds to domain and issues TLS cert
+# • If $DOMAIN is empty: binds to :80 (plain HTTP on bare Elastic IP)
+
+{$DOMAIN::80} {
+    log {
+        output stdout
+        format json
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+    }
+
+    # Health check probe -> AI Service (polled by scripts/demo.sh)
+    handle /healthz {
+        reverse_proxy ai-service:8000
+    }
+
+    # Platform API & Inbound GitHub Webhooks -> Go Platform Server
+    handle /webhook* {
+        reverse_proxy platform:8080
+    }
+
+    handle /api/* {
+        reverse_proxy platform:8080
+    }
+
+    handle /health {
+        reverse_proxy platform:8080
+    }
+
+    # Next.js Frontend Dashboard
+    handle /* {
+        reverse_proxy dashboard:3000
+    }
+}

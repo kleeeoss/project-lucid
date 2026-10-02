@@ -1,0 +1,6 @@
+aws_region    = "ap-southeast-2"
+environment   = "showcase"
+instance_type = "m7i-flex.large"
+admin_cidr    = "0.0.0.0/0" # Replace with your IP/32: curl ifconfig.me
+key_name      = "lucid-ci-key"
+domain        = "" # Set if using a real domain (e.g. lucid.duckdns.org), otherwise leave blank

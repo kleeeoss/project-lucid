@@ -1,23 +1,28 @@
-FROM golang:bookworm AS builder
+FROM golang:1.22-bookworm AS builder
 
 WORKDIR /app
 
-COPY go.work ./
-COPY engine/go.mod engine/go.sum ./engine/
-COPY platform/go.mod platform/go.sum ./platform/
+ENV GOWORK=off
 
+# Copy platform go.mod and go.sum for caching
+COPY platform/go.mod platform/go.sum* ./platform/
 WORKDIR /app/platform
 RUN go mod download
 
+# Copy platform source code
 WORKDIR /app
-COPY engine/ ./engine/
 COPY platform/ ./platform/
 
+# Build static server binary
 WORKDIR /app/platform
-RUN CGO_ENABLED=1 GOOS=linux go build -o /bin/server cmd/server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/server cmd/server/main.go
 
+# Production minimal runtime
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /bin/server /bin/server
 

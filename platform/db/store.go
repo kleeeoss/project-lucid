@@ -105,18 +105,22 @@ func (s *pgStore) GetRepositoryByID(ctx context.Context, id int64) (*models.Repo
 }
 
 func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error {
+	// Support deterministic caller-provided scan UUID (e.g. task.TaskID) or generate fresh UUID
 	query := `
 		INSERT INTO scan_runs (id, repository_id, pr_number, commit_sha, status, findings_count, started_at)
-		VALUES (COALESCE(NULLIF($6, '')::uuid, gen_random_uuid()), $1, $2, $3, $4::scan_status, $5, NOW())
+		VALUES (COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (id) DO UPDATE
+		SET status = EXCLUDED.status,
+		    findings_count = EXCLUDED.findings_count
 		RETURNING id, started_at;
 	`
 	err := s.pool.QueryRow(ctx, query,
+		scan.ID,
 		scan.RepositoryID,
 		scan.PRNumber,
 		scan.CommitSHA,
-		string(scan.Status),
+		scan.Status,
 		scan.FindingsCount,
-		scan.ID,
 	).Scan(&scan.ID, &scan.StartedAt)
 	if err != nil {
 		return fmt.Errorf("CreateScanRun: %w", err)
@@ -127,13 +131,13 @@ func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error
 func (s *pgStore) UpdateScanRunStatus(ctx context.Context, scanID string, status models.ScanStatus, findingsCount int, durationMs *int) error {
 	query := `
 		UPDATE scan_runs
-		SET status = $1::scan_status,
+		SET status = $1,
 		    findings_count = $2,
 		    scan_duration_ms = $3,
-		    completed_at = CASE WHEN $1::text IN ('COMPLETED', 'FAILED') THEN NOW() ELSE completed_at END
+		    completed_at = CASE WHEN $1 IN ('COMPLETED', 'FAILED') THEN NOW() ELSE completed_at END
 		WHERE id = $4::uuid;
 	`
-	tag, err := s.pool.Exec(ctx, query, string(status), findingsCount, durationMs, scanID)
+	tag, err := s.pool.Exec(ctx, query, status, findingsCount, durationMs, scanID)
 	if err != nil {
 		return fmt.Errorf("UpdateScanRunStatus: %w", err)
 	}
@@ -190,6 +194,7 @@ func (s *pgStore) InsertVulnerabilities(ctx context.Context, scanID string, vuln
 		return nil
 	}
 
+	// Use pgx.CopyFrom for high-throughput batch insert
 	rows := make([][]any, len(vulns))
 	for i, v := range vulns {
 		rows[i] = []any{

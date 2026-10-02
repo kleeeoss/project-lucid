@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/aws"
 
 	"lucid-ci/platform/db"
 	"lucid-ci/platform/models"
@@ -17,6 +17,11 @@ import (
 
 // TaskHandler is the function signature executed per scan task.
 type TaskHandler func(ctx context.Context, task models.ScanTaskMessage) error
+
+type queuedJob struct {
+	task          models.ScanTaskMessage
+	receiptHandle string
+}
 
 // Pool manages a bounded goroutine worker pool consuming from AWS SQS.
 type Pool struct {
@@ -51,24 +56,24 @@ func (p *Pool) Start(ctx context.Context) {
 		"queue_url", p.queueURL,
 	)
 
-	taskChan := make(chan *models.ScanTaskMessage, p.concurrency*2)
+	jobChan := make(chan queuedJob, p.concurrency*2)
 
 	// Launch worker goroutines
 	for i := 1; i <= p.concurrency; i++ {
 		p.wg.Add(1)
-		go p.workerLoop(ctx, i, taskChan)
+		go p.workerLoop(ctx, i, jobChan)
 	}
 
-	// Dispatcher loop: polls SQS and pushes to taskChan
-	p.dispatcherLoop(ctx, taskChan)
+	// Dispatcher loop: polls SQS and pushes to jobChan
+	p.dispatcherLoop(ctx, jobChan)
 
-	// Context cancelled, close task channel and wait for workers to finish active jobs
-	close(taskChan)
+	// Context cancelled, close job channel and wait for workers to finish active jobs
+	close(jobChan)
 	p.wg.Wait()
 	p.logger.Info("Platform Worker Pool stopped cleanly")
 }
 
-func (p *Pool) dispatcherLoop(ctx context.Context, taskChan chan<- *models.ScanTaskMessage) {
+func (p *Pool) dispatcherLoop(ctx context.Context, jobChan chan<- queuedJob) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -95,13 +100,20 @@ func (p *Pool) dispatcherLoop(ctx context.Context, taskChan chan<- *models.ScanT
 				if err := json.Unmarshal([]byte(*msg.Body), &task); err != nil {
 					p.logger.Error("Failed to unmarshal SQS scan message body", "error", err)
 					// Delete poisoned message to prevent infinite queue loops
-					p.deleteSQSMessage(ctx, *msg.ReceiptHandle)
+					if msg.ReceiptHandle != nil {
+						p.deleteSQSMessage(ctx, *msg.ReceiptHandle)
+					}
 					continue
+				}
+
+				receipt := ""
+				if msg.ReceiptHandle != nil {
+					receipt = *msg.ReceiptHandle
 				}
 
 				// Dispatch task to worker channel
 				select {
-				case taskChan <- &task:
+				case jobChan <- queuedJob{task: task, receiptHandle: receipt}:
 				case <-ctx.Done():
 					return
 				}
@@ -110,16 +122,16 @@ func (p *Pool) dispatcherLoop(ctx context.Context, taskChan chan<- *models.ScanT
 	}
 }
 
-func (p *Pool) workerLoop(ctx context.Context, workerID int, taskChan <-chan *models.ScanTaskMessage) {
+func (p *Pool) workerLoop(ctx context.Context, workerID int, jobChan <-chan queuedJob) {
 	defer p.wg.Done()
 	p.logger.Debug("Worker goroutine started", "worker_id", workerID)
 
-	for task := range taskChan {
-		p.processTaskSafely(ctx, workerID, *task)
+	for job := range jobChan {
+		p.processTaskSafely(ctx, workerID, job.task, job.receiptHandle)
 	}
 }
 
-func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.ScanTaskMessage) {
+func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.ScanTaskMessage, receiptHandle string) {
 	// Panic recovery guard per scan execution
 	defer func() {
 		if r := recover(); r != nil {
@@ -129,9 +141,7 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 				"panic", r,
 			)
 			if p.store != nil {
-				if err := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, nil); err != nil {
-					p.logger.Error("Failed to update scan run status on panic", "error", err)
-				}
+				_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, nil)
 			}
 		}
 	}()
@@ -144,6 +154,11 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 		"pr", task.PRNumber,
 		"commit", task.CommitSHA,
 	)
+
+	// Transition status to SCANNING in database
+	if p.store != nil {
+		_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusScanning, 0, nil)
+	}
 
 	var err error
 	if p.handler != nil {
@@ -159,22 +174,24 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 			"error", err,
 		)
 		if p.store != nil {
-			if updateErr := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, &durationMs); updateErr != nil {
-				p.logger.Error("Failed to update scan run status to FAILED", "error", updateErr)
-			}
+			_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, &durationMs)
 		}
+		// Do not delete message so SQS DLQ can retry according to redrive policy
 		return
+	}
+
+	// CRITICAL: Successfully processed task MUST be deleted from SQS to prevent infinite redelivery
+	if receiptHandle != "" && p.client != nil {
+		p.deleteSQSMessage(ctx, receiptHandle)
+		p.logger.Info("Deleted completed message from SQS queue",
+			"task_id", task.TaskID,
+		)
 	}
 
 	p.logger.Info("Scan task completed successfully",
 		"task_id", task.TaskID,
 		"duration_ms", durationMs,
 	)
-	if p.store != nil {
-		if updateErr := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusCompleted, 1, &durationMs); updateErr != nil {
-			p.logger.Error("Failed to update scan run status to COMPLETED", "error", updateErr)
-		}
-	}
 }
 
 func (p *Pool) deleteSQSMessage(ctx context.Context, receiptHandle string) {

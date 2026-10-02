@@ -3,9 +3,10 @@
 
 $ErrorActionPreference = "Stop"
 
-$Secret = "dev_webhook_secret_12345"
+$Secret = if ($env:GITHUB_WEBHOOK_SECRET) { $env:GITHUB_WEBHOOK_SECRET } else { "dev_webhook_secret_12345" }
+$Port = if ($env:PORT) { $env:PORT } else { "8080" }
 $PayloadPath = Join-Path $PSScriptRoot "payloads\test_pr.json"
-$Url = "http://localhost:8081/webhook"
+$Url = if ($env:WEBHOOK_URL) { $env:WEBHOOK_URL } else { "http://localhost:${Port}/webhook" }
 
 if (-not (Test-Path $PayloadPath)) {
     Write-Error "Payload file not found at: $PayloadPath"
