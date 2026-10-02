@@ -14,13 +14,14 @@ test-platform:
 
 # Python AI Service Unit Testing
 test:
-	@cd infra-ai && ( [ -f .venv/bin/pytest ] && .venv/bin/pytest -v || pytest -v )
+	@cd infra-ai && if [ -f .venv/bin/pytest ]; then .venv/bin/pytest -v; else pytest -v; fi
 
 test-schemas:
-	@cd infra-ai && ( [ -f .venv/bin/pytest ] && .venv/bin/pytest -v tests/test_schemas.py || pytest -v tests/test_schemas.py )
+	@cd infra-ai && if [ -f .venv/bin/pytest ]; then .venv/bin/pytest -v tests/test_schemas.py; else pytest -v tests/test_schemas.py; fi
 
 test-pipeline:
-	@cd infra-ai && ( [ -f .venv/bin/pytest ] && .venv/bin/pytest -v tests/test_remediation_pipeline.py || pytest -v tests/test_remediation_pipeline.py )
+	@cd infra-ai && if [ -f .venv/bin/pytest ]; then .venv/bin/pytest -v tests/test_remediation_pipeline.py; else pytest -v tests/test_remediation_pipeline.py; fi
+
 
 test-local:
 	@bash scripts/test_e2e_local.sh

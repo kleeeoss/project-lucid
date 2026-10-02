@@ -6,7 +6,7 @@ Verifies /healthz, /remediate (CTR-004 -> CTR-005), and /sandbox/detonate (CTR-0
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from service.main import app
-from models.schemas import RemediationResponse
+from models.schemas import RemediationResponse, SandboxResult
 from models.mock_payloads import (
     create_mock_remediation_request,
     create_mock_sandbox_request,
@@ -67,7 +67,19 @@ def test_remediate_endpoint_validation_error():
 
 def test_sandbox_detonate_endpoint_success():
     req = create_mock_sandbox_request(scan_id="scan-uuid-99999")
-    response = client.post("/sandbox/detonate", json=req.model_dump())
+    mock_result = SandboxResult(
+        scan_id=req.scan_id,
+        status="PASSED",
+        exit_code=0,
+        duration_ms=45,
+        stdout="All unit tests passed successfully!",
+        stderr="",
+        network_egress_attempts=0,
+    )
+    with patch("service.routes.orchestrator.detonate", new_callable=AsyncMock) as mock_detonate:
+        mock_detonate.return_value = mock_result
+        response = client.post("/sandbox/detonate", json=req.model_dump())
+
     assert response.status_code == 200
 
     data = response.json()
@@ -75,3 +87,4 @@ def test_sandbox_detonate_endpoint_success():
     assert data["status"] == "PASSED"
     assert data["exit_code"] == 0
     assert data["network_egress_attempts"] == 0
+
