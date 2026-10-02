@@ -8,6 +8,7 @@ Thumbs.db
 !.env.example
 *.pem
 *.key
+.env.example
 
 # Go build artifacts & cache
 bin/

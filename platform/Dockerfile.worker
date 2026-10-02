@@ -1,20 +1,43 @@
-FROM golang:bookworm AS builder
+# Multi-stage builder with Cgo support for Tree-sitter bindings
+FROM golang:1.22-bookworm AS builder
+
+# Install C/C++ compiler and headers required for Tree-sitter grammar compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libc-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY platform/go.mod platform/go.sum ./platform/
+# Copy root workspace and module configurations
+COPY go.work go.work.sum* ./
+COPY engine/go.mod engine/go.sum* ./engine/
+COPY platform/go.mod platform/go.sum* ./platform/
+
+# Download dependencies
 WORKDIR /app/platform
 RUN go mod download
+WORKDIR /app/engine
+RUN go mod download
 
+# Copy full source trees for engine and platform
 WORKDIR /app
+COPY engine/ ./engine/
 COPY platform/ ./platform/
 
+# Build worker with CGO_ENABLED=1
 WORKDIR /app/platform
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/worker cmd/worker/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -o /bin/worker cmd/worker/main.go
 
 # Production minimal runtime
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /bin/worker /bin/worker
 

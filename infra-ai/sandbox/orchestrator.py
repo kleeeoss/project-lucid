@@ -77,24 +77,44 @@ class SandboxOrchestrator:
                 container_name=container_name,
                 command=request.build_command,
                 timeout=request.timeout_seconds,
+                runtime=settings.SANDBOX_RUNTIME,
             )
 
             # Command executes via entrypoint.sh in /workspace
             cmd_args = ["/bin/bash", "-c", request.build_command]
 
-            container = client.containers.create(
-                image=settings.SANDBOX_IMAGE_TAG,
-                name=container_name,
-                command=cmd_args,
-                volumes={str(workspace_dir): {"bind": "/workspace", "mode": "rw"}},
-                network_mode="none",
-                mem_limit=settings.SANDBOX_MEMORY_LIMIT,
-                nano_cpus=nano_cpus,
-                pids_limit=settings.SANDBOX_PID_LIMIT,
-                read_only=True,
-                tmpfs={"/tmp": "rw,noexec,nosuid,size=64m"},
-                user="10001:10001",
-            )
+            container_kwargs = {
+                "image": settings.SANDBOX_IMAGE_TAG,
+                "name": container_name,
+                "command": cmd_args,
+                "volumes": {str(workspace_dir): {"bind": "/workspace", "mode": "rw"}},
+                "network_mode": "none",
+                "mem_limit": settings.SANDBOX_MEMORY_LIMIT,
+                "nano_cpus": nano_cpus,
+                "pids_limit": settings.SANDBOX_PID_LIMIT,
+                "read_only": True,
+                "tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},
+                "user": "10001:10001",
+            }
+
+            if settings.SANDBOX_RUNTIME:
+                container_kwargs["runtime"] = settings.SANDBOX_RUNTIME
+
+            try:
+                container = client.containers.create(**container_kwargs)
+            except APIError as create_err:
+                # If runsc is requested but not installed (e.g. dev machine), fallback gracefully
+                if settings.SANDBOX_RUNTIME and any(term in str(create_err).lower() for term in ("unknown runtime", "invalid runtime")):
+                    logger.warning(
+                        "sandbox_runtime_unavailable_falling_back",
+                        requested_runtime=settings.SANDBOX_RUNTIME,
+                        fallback="runc",
+                        error=str(create_err),
+                    )
+                    container_kwargs.pop("runtime", None)
+                    container = client.containers.create(**container_kwargs)
+                else:
+                    raise
 
             container.start()
 

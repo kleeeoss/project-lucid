@@ -32,7 +32,7 @@ func TestPool_ProcessTaskSafely_PanicRecovery(t *testing.T) {
 		}
 	}()
 
-	pool.processTaskSafely(context.Background(), 1, task)
+	pool.processTaskSafely(context.Background(), 1, task, "")
 }
 
 func TestPool_ProcessTaskSafely_SuccessAndFailure(t *testing.T) {
@@ -48,7 +48,7 @@ func TestPool_ProcessTaskSafely_SuccessAndFailure(t *testing.T) {
 	pool := NewPool(nil, "http://mock-queue", nil, 1, logger, successHandler)
 	task := models.ScanTaskMessage{TaskID: "success-task"}
 
-	pool.processTaskSafely(context.Background(), 1, task)
+	pool.processTaskSafely(context.Background(), 1, task, "")
 
 	if !executed.Load() {
 		t.Errorf("Expected handler to be executed")
@@ -58,5 +58,5 @@ func TestPool_ProcessTaskSafely_SuccessAndFailure(t *testing.T) {
 		return errors.New("simulated network error")
 	}
 	pool.handler = errorHandler
-	pool.processTaskSafely(context.Background(), 1, task)
+	pool.processTaskSafely(context.Background(), 1, task, "")
 }

@@ -105,12 +105,17 @@ func (s *pgStore) GetRepositoryByID(ctx context.Context, id int64) (*models.Repo
 }
 
 func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error {
+	// Support deterministic caller-provided scan UUID (e.g. task.TaskID) or generate fresh UUID
 	query := `
 		INSERT INTO scan_runs (id, repository_id, pr_number, commit_sha, status, findings_count, started_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())
+		VALUES (COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (id) DO UPDATE
+		SET status = EXCLUDED.status,
+		    findings_count = EXCLUDED.findings_count
 		RETURNING id, started_at;
 	`
 	err := s.pool.QueryRow(ctx, query,
+		scan.ID,
 		scan.RepositoryID,
 		scan.PRNumber,
 		scan.CommitSHA,
@@ -130,7 +135,7 @@ func (s *pgStore) UpdateScanRunStatus(ctx context.Context, scanID string, status
 		    findings_count = $2,
 		    scan_duration_ms = $3,
 		    completed_at = CASE WHEN $1 IN ('COMPLETED', 'FAILED') THEN NOW() ELSE completed_at END
-		WHERE id = $4;
+		WHERE id = $4::uuid;
 	`
 	tag, err := s.pool.Exec(ctx, query, status, findingsCount, durationMs, scanID)
 	if err != nil {
@@ -146,7 +151,7 @@ func (s *pgStore) UpdateCheckRunID(ctx context.Context, scanID string, checkRunI
 	query := `
 		UPDATE scan_runs
 		SET check_run_id = $1
-		WHERE id = $2;
+		WHERE id = $2::uuid;
 	`
 	_, err := s.pool.Exec(ctx, query, checkRunID, scanID)
 	if err != nil {
@@ -160,7 +165,7 @@ func (s *pgStore) GetScanRunByID(ctx context.Context, scanID string) (*models.Sc
 		SELECT id, repository_id, pr_number, commit_sha, status, check_run_id,
 		       findings_count, scan_duration_ms, started_at, completed_at
 		FROM scan_runs
-		WHERE id = $1;
+		WHERE id = $1::uuid;
 	`
 	var scan models.ScanRun
 	err := s.pool.QueryRow(ctx, query, scanID).Scan(
@@ -249,7 +254,7 @@ func (s *pgStore) GetVulnerabilitiesByScanRunID(ctx context.Context, scanID stri
 		       ai_remediation_patch, ai_explanation, sandbox_verified,
 		       ast_graph_json, created_at
 		FROM vulnerabilities
-		WHERE scan_run_id = $1
+		WHERE scan_run_id = $1::uuid
 		ORDER BY line_start ASC;
 	`
 	rows, err := s.pool.Query(ctx, query, scanID)

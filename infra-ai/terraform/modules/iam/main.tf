@@ -52,6 +52,12 @@ resource "aws_iam_role_policy_attachment" "sqs_attach" {
   policy_arn = aws_iam_policy.sqs_access.arn
 }
 
+# Attach AWS SSM Managed Instance Core for Session Manager console access
+resource "aws_iam_role_policy_attachment" "ssm_attach" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 resource "aws_iam_instance_profile" "instance_profile" {
   name = "lucid-ci-instance-profile"
   role = aws_iam_role.ec2_role.name
