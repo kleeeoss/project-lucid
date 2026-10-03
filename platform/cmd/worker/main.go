@@ -110,304 +110,7 @@ func main() {
 	})
 
 	// 6. Orchestration Pipeline Handler (TASK-PLT-301, 302, 303 + Engine Integration)
-	pipelineHandler := func(ctx context.Context, task models.ScanTaskMessage) error {
-		startTime := time.Now()
-		logger.Info("Starting end-to-end scan pipeline orchestration",
-			"task_id", task.TaskID,
-			"repo", task.RepositoryName,
-			"pr", task.PRNumber,
-			"commit", task.CommitSHA,
-		)
-
-		// Record Scan Run in PostgreSQL
-		if store != nil {
-			repo := &models.Repository{
-				ID:             task.RepositoryID,
-				FullName:       task.RepositoryName,
-				InstallationID: task.InstallationID,
-				DefaultBranch:  "main",
-			}
-			if err := store.UpsertRepository(ctx, repo); err != nil {
-				logger.Warn("Failed to upsert repository", "error", err)
-			}
-
-			scanRun := &models.ScanRun{
-				ID:            task.TaskID,
-				RepositoryID:  task.RepositoryID,
-				PRNumber:      task.PRNumber,
-				CommitSHA:     task.CommitSHA,
-				Status:        models.ScanStatusScanning,
-				FindingsCount: 0,
-			}
-			if err := store.CreateScanRun(ctx, scanRun); err != nil {
-				logger.Warn("Failed to create scan run record", "error", err)
-			} else {
-				logger.Info("Created scan_run in PostgreSQL", "scan_id", scanRun.ID)
-			}
-		}
-
-		// Parse repo owner and name
-		var owner, repoName string
-		parts := strings.Split(task.RepositoryName, "/")
-		if len(parts) == 2 {
-			owner, repoName = parts[0], parts[1]
-		}
-
-		// Acquire GitHub Installation Token if configured
-		var githubToken string
-		if tokenManager != nil && task.InstallationID > 0 {
-			tok, err := tokenManager.GetInstallationToken(ctx, task.InstallationID)
-			if err != nil {
-				logger.Warn("Failed to acquire GitHub installation token", "error", err)
-			} else {
-				githubToken = tok
-			}
-		}
-
-		// Create GitHub Check Run (Status: In Progress)
-		var checkRunID int64
-		if githubToken != "" && owner != "" && repoName != "" {
-			cID, err := checkRunClient.CreateCheckRun(
-				ctx,
-				githubToken,
-				owner,
-				repoName,
-				task.CommitSHA,
-				"Lucid-CI Security Analysis",
-			)
-			if err != nil {
-				logger.Warn("Failed to create GitHub Check Run", "error", err)
-			} else {
-				checkRunID = cID
-				if store != nil {
-					_ = store.UpdateCheckRunID(ctx, task.TaskID, checkRunID)
-				}
-			}
-		}
-
-		// Collect target source files for analysis
-		targetFiles := getScanTargetFiles(task)
-
-		// Run Apurv's Static Analysis Engine
-		var allEngineFindings []enginemodels.Vulnerability
-		for _, file := range targetFiles {
-			// Rule 1: SQL Injection (LUCID-SEC-001)
-			sqli, err := rules.DetectSQLInjection(file.Path, file.Content)
-			if err == nil {
-				allEngineFindings = append(allEngineFindings, sqli...)
-			}
-
-			// Rule 2: Command Injection (LUCID-SEC-002)
-			cmdi, err := rules.DetectCommandInjection(file.Path, file.Content)
-			if err == nil {
-				allEngineFindings = append(allEngineFindings, cmdi...)
-			}
-
-			// Rule 3: Insecure Secrets (LUCID-SEC-003)
-			sec, err := rules.DetectInsecureSecrets(file.Path, file.Content)
-			if err == nil {
-				allEngineFindings = append(allEngineFindings, sec...)
-			}
-
-			// Rule 4: Path Traversal (LUCID-SEC-004)
-			pathTrav, err := rules.DetectPathTraversal(file.Path, file.Content)
-			if err == nil {
-				allEngineFindings = append(allEngineFindings, pathTrav...)
-			}
-		}
-
-		logger.Info("Static engine analysis completed",
-			"task_id", task.TaskID,
-			"files_scanned", len(targetFiles),
-			"findings_count", len(allEngineFindings),
-		)
-
-		var persistedVulns []models.Vulnerability
-		var checkAnnotations []github.CheckRunAnnotation
-
-		// Process each detected vulnerability through AI remediation & sandbox
-		for idx, f := range allEngineFindings {
-			taskPrefix := task.TaskID
-			if len(taskPrefix) > 8 {
-				taskPrefix = taskPrefix[:8]
-			}
-			vulnID := fmt.Sprintf("vuln-%s-%03d", taskPrefix, idx+1)
-
-			// Format taint path summary for CTR-004
-			var taintSummary []string
-			for _, step := range f.TaintPath {
-				taintSummary = append(taintSummary, fmt.Sprintf("%s (%s at line %d)", step.Name, step.Type, step.Line))
-			}
-			if len(taintSummary) == 0 {
-				taintSummary = []string{fmt.Sprintf("%s -> %s", f.SourceNode.Name, f.SinkNode.Name)}
-			}
-
-			surroundingCtx := extractSurroundingContext(f, targetFiles)
-			sourceDesc := f.SourceNode.Name
-			if sourceDesc == "" {
-				sourceDesc = fmt.Sprintf("Untrusted Input (%s)", f.SourceNode.Type)
-			}
-			sinkDesc := f.SinkNode.Name
-			if sinkDesc == "" {
-				sinkDesc = fmt.Sprintf("Dangerous Execution Sink (%s)", f.SinkNode.Type)
-			}
-
-			// Format CTR-004 request satisfying all required fields (no empty strings)
-			remReq := worker.RemediationRequest{
-				ScanID:             task.TaskID,
-				VulnerabilityID:    vulnID,
-				RuleID:             f.RuleID,
-				CWE:                f.CWE,
-				Language:           mapLanguage(f.FilePath),
-				VulnerableCode:     f.VulnerableCode,
-				SurroundingContext: surroundingCtx,
-				SourceInfo:         sourceDesc,
-				SinkInfo:           sinkDesc,
-				TaintPathSummary:   taintSummary,
-			}
-
-			// Call Garv's AI Remediation service (Fail-Open BR-002)
-			var suggestedPatch, explanation string
-			remResp, err := aiClient.RemediateVulnerability(ctx, remReq)
-			if err != nil {
-				logger.Warn("AI Remediation skipped or timed out (Fail-Open BR-002 active)",
-					"vuln_id", vulnID,
-					"error", err,
-				)
-			} else {
-				suggestedPatch = remResp.SuggestedPatch
-				explanation = remResp.Explanation
-				logger.Info("AI Remediation generated patch successfully",
-					"vuln_id", vulnID,
-					"model", remResp.ModelName,
-					"confidence", remResp.Confidence,
-				)
-			}
-
-			// Dynamic Sandbox Detonation Hook (CTR-006 / CTR-007)
-			sandboxVerified := false
-			if suggestedPatch != "" {
-				sandboxReq := worker.SandboxRequest{
-					ScanID:         task.TaskID,
-					CommitSHA:      task.CommitSHA,
-					Language:       remReq.Language,
-					BuildCommand:   getBuildCommandForLanguage(remReq.Language),
-					TimeoutSeconds: 60,
-					PatchContent:   suggestedPatch,
-					Files: map[string]string{
-						f.FilePath: f.VulnerableCode,
-					},
-				}
-				sbResult, err := sandboxClient.Detonate(ctx, sandboxReq)
-				if err != nil {
-					logger.Warn("Sandbox verification skipped or offline", "error", err)
-				} else if sbResult.Status == "PASSED" {
-					sandboxVerified = true
-					logger.Info("Sandbox verification confirmed patch validity", "vuln_id", vulnID)
-				}
-			}
-
-			// Post inline PR suggestion comment on GitHub if connected
-			if githubToken != "" && task.PRNumber > 0 && suggestedPatch != "" {
-				commentBody := fmt.Sprintf(
-					"### 🛡️ Lucid-CI Security Finding: %s (%s)\n\n"+
-						"**Severity:** %s | **Confidence:** %.2f\n\n"+
-						"**Description:** %s\n\n"+
-						"**AI Remediation Explanation:**\n%s\n\n"+
-						"**Suggested Patch:**\n```%s\n%s\n```\n\n"+
-						"*(Sandbox Verified: %t)*",
-					f.RuleName, f.CWE, f.Severity, f.ConfidenceScore,
-					f.Description, explanation, remReq.Language, suggestedPatch, sandboxVerified,
-				)
-				_ = checkRunClient.PostPRReviewComment(
-					ctx,
-					githubToken,
-					owner,
-					repoName,
-					task.PRNumber,
-					task.CommitSHA,
-					f.FilePath,
-					f.LineStart,
-					commentBody,
-				)
-			}
-
-			// Accumulate Check Run annotation
-			checkAnnotations = append(checkAnnotations, github.CheckRunAnnotation{
-				Path:            f.FilePath,
-				StartLine:       f.LineStart,
-				EndLine:         f.LineEnd,
-				AnnotationLevel: mapSeverityToAnnotationLevel(string(f.Severity)),
-				Title:           fmt.Sprintf("%s (%s)", f.RuleName, f.CWE),
-				Message:         f.Description,
-				RawDetails:      fmt.Sprintf("Vulnerable Code: %s\nAI Patch: %s", f.VulnerableCode, suggestedPatch),
-			})
-
-			// Prepare DB record
-			var patchPtr, expPtr *string
-			if suggestedPatch != "" {
-				patchPtr = &suggestedPatch
-			}
-			if explanation != "" {
-				expPtr = &explanation
-			}
-
-			persistedVulns = append(persistedVulns, models.Vulnerability{
-				ID:                 vulnID,
-				ScanRunID:          task.TaskID,
-				RuleID:             f.RuleID,
-				CWE:                f.CWE,
-				Severity:           models.VulnSeverity(f.Severity),
-				ConfidenceScore:    f.ConfidenceScore,
-				FilePath:           f.FilePath,
-				LineStart:          f.LineStart,
-				LineEnd:            f.LineEnd,
-				VulnerableCode:     f.VulnerableCode,
-				AIRemediationPatch: patchPtr,
-				AIExplanation:      expPtr,
-				SandboxVerified:    sandboxVerified,
-			})
-		}
-
-		// Persist vulnerabilities in PostgreSQL
-		if store != nil && len(persistedVulns) > 0 {
-			if err := store.InsertVulnerabilities(ctx, task.TaskID, persistedVulns); err != nil {
-				logger.Error("Failed to persist vulnerabilities in store", "error", err)
-			}
-		}
-
-		durationMs := int(time.Since(startTime).Milliseconds())
-
-		// Conclude GitHub Check Run
-		if githubToken != "" && checkRunID > 0 {
-			conclusion := "success"
-			summary := "Lucid-CI completed automated security analysis. No vulnerabilities detected."
-			if len(allEngineFindings) > 0 {
-				conclusion = "failure"
-				summary = fmt.Sprintf("Lucid-CI identified %d potential security vulnerability(ies) in this change.", len(allEngineFindings))
-			}
-
-			output := github.CheckRunOutput{
-				Title:       "Lucid-CI Security Report",
-				Summary:     summary,
-				Annotations: checkAnnotations,
-			}
-			_ = checkRunClient.UpdateCheckRun(ctx, githubToken, owner, repoName, checkRunID, conclusion, output)
-		}
-
-		// Finalize Scan Run status in PostgreSQL
-		if store != nil {
-			_ = store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusCompleted, len(allEngineFindings), &durationMs)
-		}
-
-		logger.Info("Scan pipeline completed successfully",
-			"task_id", task.TaskID,
-			"duration_ms", durationMs,
-			"findings_count", len(allEngineFindings),
-		)
-
-		return nil
-	}
+	pipelineHandler := NewPipelineHandler(logger, store, aiClient, sandboxClient, tokenManager, checkRunClient)
 
 	// 7. Launch Worker Pool
 	pool := worker.NewPool(sqsClient, queueURL, store, concurrency, logger, pipelineHandler)
@@ -509,5 +212,341 @@ func getBuildCommandForLanguage(lang string) string {
 		return "go test ./..."
 	default:
 		return "npm test"
+	}
+}
+
+// NewPipelineHandler creates the main end-to-end task handler.
+func NewPipelineHandler(
+	logger *slog.Logger,
+	store db.Store,
+	aiClient worker.AIClient,
+	sandboxClient worker.SandboxClient,
+	tokenManager github.TokenManager,
+	checkRunClient github.CheckRunClient,
+) worker.TaskHandler {
+	return func(ctx context.Context, task models.ScanTaskMessage) error {
+		startTime := time.Now()
+		logger.Info("Starting end-to-end scan pipeline orchestration",
+			"task_id", task.TaskID,
+			"repo", task.RepositoryName,
+			"pr", task.PRNumber,
+			"commit", task.CommitSHA,
+		)
+
+		// Record Scan Run in PostgreSQL
+		if store != nil {
+			repo := &models.Repository{
+				ID:             task.RepositoryID,
+				FullName:       task.RepositoryName,
+				InstallationID: task.InstallationID,
+				DefaultBranch:  "main",
+			}
+			if err := store.UpsertRepository(ctx, repo); err != nil {
+				logger.Error("Failed to upsert repository in store", "error", err, "repo_id", repo.ID)
+				return fmt.Errorf("failed to upsert repository: %w", err)
+			}
+
+			scanRun := &models.ScanRun{
+				ID:            task.TaskID,
+				RepositoryID:  task.RepositoryID,
+				PRNumber:      task.PRNumber,
+				CommitSHA:     task.CommitSHA,
+				Status:        models.ScanStatusScanning,
+				FindingsCount: 0,
+			}
+			if err := store.CreateScanRun(ctx, scanRun); err != nil {
+				logger.Error("Failed to create scan run record in store", "error", err, "task_id", task.TaskID)
+				return fmt.Errorf("failed to create scan run record: %w", err)
+			}
+			logger.Info("Created scan_run in PostgreSQL", "scan_id", scanRun.ID)
+		}
+
+		// Parse repo owner and name
+		var owner, repoName string
+		parts := strings.Split(task.RepositoryName, "/")
+		if len(parts) == 2 {
+			owner, repoName = parts[0], parts[1]
+		}
+
+		// Acquire GitHub Installation Token if configured
+		var githubToken string
+		if tokenManager != nil && task.InstallationID > 0 {
+			tok, err := tokenManager.GetInstallationToken(ctx, task.InstallationID)
+			if err != nil {
+				logger.Warn("Failed to acquire GitHub installation token", "error", err)
+			} else {
+				githubToken = tok
+			}
+		}
+
+		// Create GitHub Check Run (Status: In Progress)
+		var checkRunID int64
+		if checkRunClient != nil && githubToken != "" && owner != "" && repoName != "" {
+			cID, err := checkRunClient.CreateCheckRun(
+				ctx,
+				githubToken,
+				owner,
+				repoName,
+				task.CommitSHA,
+				"Lucid-CI Security Analysis",
+			)
+			if err != nil {
+				logger.Warn("Failed to create GitHub Check Run", "error", err)
+			} else {
+				checkRunID = cID
+				if store != nil {
+					if err := store.UpdateCheckRunID(ctx, task.TaskID, checkRunID); err != nil {
+						logger.Warn("Failed to update check run ID in store", "error", err)
+					}
+				}
+			}
+		}
+
+		// Collect target source files for analysis
+		targetFiles := getScanTargetFiles(task)
+
+		// Run Static Analysis Engine
+		var allEngineFindings []enginemodels.Vulnerability
+		for _, file := range targetFiles {
+			// Rule 1: SQL Injection (LUCID-SEC-001)
+			sqli, err := rules.DetectSQLInjection(file.Path, file.Content)
+			if err == nil {
+				allEngineFindings = append(allEngineFindings, sqli...)
+			}
+
+			// Rule 2: Command Injection (LUCID-SEC-002)
+			cmdi, err := rules.DetectCommandInjection(file.Path, file.Content)
+			if err == nil {
+				allEngineFindings = append(allEngineFindings, cmdi...)
+			}
+
+			// Rule 3: Insecure Secrets (LUCID-SEC-003)
+			sec, err := rules.DetectInsecureSecrets(file.Path, file.Content)
+			if err == nil {
+				allEngineFindings = append(allEngineFindings, sec...)
+			}
+
+			// Rule 4: Path Traversal (LUCID-SEC-004)
+			pathTrav, err := rules.DetectPathTraversal(file.Path, file.Content)
+			if err == nil {
+				allEngineFindings = append(allEngineFindings, pathTrav...)
+			}
+		}
+
+		logger.Info("Static engine analysis completed",
+			"task_id", task.TaskID,
+			"files_scanned", len(targetFiles),
+			"findings_count", len(allEngineFindings),
+		)
+
+		var persistedVulns []models.Vulnerability
+		var checkAnnotations []github.CheckRunAnnotation
+
+		if len(allEngineFindings) > 0 && store != nil {
+			if err := store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusAnalyzingAI, len(allEngineFindings), nil); err != nil {
+				logger.Warn("Failed to transition scan run status to ANALYZING_AI", "error", err)
+			}
+		}
+
+		// Process each detected vulnerability through AI remediation & sandbox
+		for idx, f := range allEngineFindings {
+			taskPrefix := task.TaskID
+			if len(taskPrefix) > 8 {
+				taskPrefix = taskPrefix[:8]
+			}
+			vulnID := fmt.Sprintf("vuln-%s-%03d", taskPrefix, idx+1)
+
+			// Format taint path summary for CTR-004
+			var taintSummary []string
+			for _, step := range f.TaintPath {
+				taintSummary = append(taintSummary, fmt.Sprintf("%s (%s at line %d)", step.Name, step.Type, step.Line))
+			}
+			if len(taintSummary) == 0 {
+				taintSummary = []string{fmt.Sprintf("%s -> %s", f.SourceNode.Name, f.SinkNode.Name)}
+			}
+
+			surroundingCtx := extractSurroundingContext(f, targetFiles)
+			sourceDesc := f.SourceNode.Name
+			if sourceDesc == "" {
+				sourceDesc = fmt.Sprintf("Untrusted Input (%s)", f.SourceNode.Type)
+			}
+			sinkDesc := f.SinkNode.Name
+			if sinkDesc == "" {
+				sinkDesc = fmt.Sprintf("Dangerous Execution Sink (%s)", f.SinkNode.Type)
+			}
+
+			// Format CTR-004 request satisfying all required fields (no empty strings)
+			remReq := worker.RemediationRequest{
+				ScanID:             task.TaskID,
+				VulnerabilityID:    vulnID,
+				RuleID:             f.RuleID,
+				CWE:                f.CWE,
+				Language:           mapLanguage(f.FilePath),
+				VulnerableCode:     f.VulnerableCode,
+				SurroundingContext: surroundingCtx,
+				SourceInfo:         sourceDesc,
+				SinkInfo:           sinkDesc,
+				TaintPathSummary:   taintSummary,
+			}
+
+			// Call AI Remediation service (Fail-Open BR-002)
+			var suggestedPatch, explanation string
+			if aiClient != nil {
+				remResp, err := aiClient.RemediateVulnerability(ctx, remReq)
+				if err != nil {
+					logger.Warn("AI Remediation skipped or timed out (Fail-Open BR-002 active)",
+						"vuln_id", vulnID,
+						"error", err,
+					)
+				} else {
+					suggestedPatch = remResp.SuggestedPatch
+					explanation = remResp.Explanation
+					logger.Info("AI Remediation generated patch successfully",
+						"vuln_id", vulnID,
+						"model", remResp.ModelName,
+						"confidence", remResp.Confidence,
+					)
+				}
+			}
+
+			// Dynamic Sandbox Detonation Hook (CTR-006 / CTR-007)
+			sandboxVerified := false
+			if suggestedPatch != "" && sandboxClient != nil {
+				if store != nil {
+					if err := store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusSandboxing, len(allEngineFindings), nil); err != nil {
+						logger.Warn("Failed to transition scan run status to SANDBOXING", "error", err)
+					}
+				}
+
+				sandboxReq := worker.SandboxRequest{
+					ScanID:         task.TaskID,
+					CommitSHA:      task.CommitSHA,
+					Language:       remReq.Language,
+					BuildCommand:   getBuildCommandForLanguage(remReq.Language),
+					TimeoutSeconds: 60,
+					PatchContent:   suggestedPatch,
+					Files: map[string]string{
+						f.FilePath: f.VulnerableCode,
+					},
+				}
+				sbResult, err := sandboxClient.Detonate(ctx, sandboxReq)
+				if err != nil {
+					logger.Warn("Sandbox verification skipped or offline", "error", err)
+				} else if sbResult.Status == "PASSED" {
+					sandboxVerified = true
+					logger.Info("Sandbox verification confirmed patch validity", "vuln_id", vulnID)
+				} else {
+					logger.Warn("Sandbox verification did not confirm patch validity",
+						"vuln_id", vulnID,
+						"status", sbResult.Status,
+						"exit_code", sbResult.ExitCode,
+					)
+				}
+			}
+
+			// Post inline PR suggestion comment on GitHub if connected
+			if checkRunClient != nil && githubToken != "" && task.PRNumber > 0 && suggestedPatch != "" {
+				commentBody := fmt.Sprintf(
+					"### 🛡️ Lucid-CI Security Finding: %s (%s)\n\n"+
+						"**Severity:** %s | **Confidence:** %.2f\n\n"+
+						"**Description:** %s\n\n"+
+						"**AI Remediation Explanation:**\n%s\n\n"+
+						"**Suggested Patch:**\n```%s\n%s\n```\n\n"+
+						"*(Sandbox Verified: %t)*",
+					f.RuleName, f.CWE, f.Severity, f.ConfidenceScore,
+					f.Description, explanation, remReq.Language, suggestedPatch, sandboxVerified,
+				)
+				_ = checkRunClient.PostPRReviewComment(
+					ctx,
+					githubToken,
+					owner,
+					repoName,
+					task.PRNumber,
+					task.CommitSHA,
+					f.FilePath,
+					f.LineStart,
+					commentBody,
+				)
+			}
+
+			// Accumulate Check Run annotation
+			checkAnnotations = append(checkAnnotations, github.CheckRunAnnotation{
+				Path:            f.FilePath,
+				StartLine:       f.LineStart,
+				EndLine:         f.LineEnd,
+				AnnotationLevel: mapSeverityToAnnotationLevel(string(f.Severity)),
+				Title:           fmt.Sprintf("%s (%s)", f.RuleName, f.CWE),
+				Message:         f.Description,
+				RawDetails:      fmt.Sprintf("Vulnerable Code: %s\nAI Patch: %s", f.VulnerableCode, suggestedPatch),
+			})
+
+			// Prepare DB record
+			var patchPtr, expPtr *string
+			if suggestedPatch != "" {
+				patchPtr = &suggestedPatch
+			}
+			if explanation != "" {
+				expPtr = &explanation
+			}
+
+			persistedVulns = append(persistedVulns, models.Vulnerability{
+				ID:                 vulnID,
+				ScanRunID:          task.TaskID,
+				RuleID:             f.RuleID,
+				CWE:                f.CWE,
+				Severity:           models.VulnSeverity(f.Severity),
+				ConfidenceScore:    f.ConfidenceScore,
+				FilePath:           f.FilePath,
+				LineStart:          f.LineStart,
+				LineEnd:            f.LineEnd,
+				VulnerableCode:     f.VulnerableCode,
+				AIRemediationPatch: patchPtr,
+				AIExplanation:      expPtr,
+				SandboxVerified:    sandboxVerified,
+			})
+		}
+
+		// Persist vulnerabilities in PostgreSQL
+		if store != nil && len(persistedVulns) > 0 {
+			if err := store.InsertVulnerabilities(ctx, task.TaskID, persistedVulns); err != nil {
+				logger.Error("Failed to persist vulnerabilities in store", "task_id", task.TaskID, "error", err)
+				return fmt.Errorf("failed to persist vulnerabilities: %w", err)
+			}
+		}
+
+		durationMs := int(time.Since(startTime).Milliseconds())
+
+		// Conclude GitHub Check Run
+		if checkRunClient != nil && githubToken != "" && checkRunID > 0 {
+			conclusion := "success"
+			summary := "Lucid-CI completed automated security analysis. No vulnerabilities detected."
+			if len(allEngineFindings) > 0 {
+				conclusion = "failure"
+				summary = fmt.Sprintf("Lucid-CI identified %d potential security vulnerability(ies) in this change.", len(allEngineFindings))
+			}
+
+			output := github.CheckRunOutput{
+				Title:       "Lucid-CI Security Report",
+				Summary:     summary,
+				Annotations: checkAnnotations,
+			}
+			_ = checkRunClient.UpdateCheckRun(ctx, githubToken, owner, repoName, checkRunID, conclusion, output)
+		}
+
+		// Finalize Scan Run status in PostgreSQL
+		if store != nil {
+			if err := store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusCompleted, len(allEngineFindings), &durationMs); err != nil {
+				logger.Error("Failed to finalize scan run status in store", "task_id", task.TaskID, "error", err)
+				return fmt.Errorf("failed to finalize scan run status: %w", err)
+			}
+		}
+
+		logger.Info("Scan pipeline completed successfully",
+			"task_id", task.TaskID,
+			"duration_ms", durationMs,
+			"findings_count", len(allEngineFindings),
+		)
+
+		return nil
 	}
 }

@@ -141,7 +141,9 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 				"panic", r,
 			)
 			if p.store != nil {
-				_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, nil)
+				if updateErr := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, nil); updateErr != nil {
+					p.logger.Error("Failed to update scan run status to FAILED on panic recovery", "task_id", task.TaskID, "error", updateErr)
+				}
 			}
 		}
 	}()
@@ -155,9 +157,11 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 		"commit", task.CommitSHA,
 	)
 
-	// Transition status to SCANNING in database
+	// Transition status to SCANNING in database if pre-created
 	if p.store != nil {
-		_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusScanning, 0, nil)
+		if err := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusScanning, 0, nil); err != nil {
+			p.logger.Debug("Scan run record not yet created or status update skipped", "task_id", task.TaskID, "error", err)
+		}
 	}
 
 	var err error
@@ -174,7 +178,9 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 			"error", err,
 		)
 		if p.store != nil {
-			_ = p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, &durationMs)
+			if updateErr := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, &durationMs); updateErr != nil {
+				p.logger.Error("Failed to update scan run status to FAILED on task failure", "task_id", task.TaskID, "error", updateErr)
+			}
 		}
 		// Do not delete message so SQS DLQ can retry according to redrive policy
 		return
