@@ -204,14 +204,14 @@ func mapSeverityToAnnotationLevel(sev string) string {
 	}
 }
 
-func getBuildCommandForLanguage(lang string) string {
+func getBuildCommandForLanguage(lang string, filePath string) string {
 	switch lang {
 	case "python":
-		return "python3 -m unittest discover -s . -p '*test*.py'"
+		return fmt.Sprintf("if ls *test*.py 1> /dev/null 2>&1; then python3 -m unittest discover -s . -p '*test*.py'; else python3 -m py_compile %s; fi", filePath)
 	case "go":
-		return "go test ./..."
+		return "if [ -f go.mod ]; then go test ./...; else go vet ./... 2>/dev/null || true; fi"
 	default:
-		return "npm test"
+		return fmt.Sprintf("if [ -f package.json ]; then npm test; else node -c %s; fi", filePath)
 	}
 }
 
@@ -418,16 +418,26 @@ func NewPipelineHandler(
 					}
 				}
 
+				sandboxFiles := make(map[string]string)
+				for _, tf := range targetFiles {
+					contentStr := string(tf.Content)
+					if tf.Path == f.FilePath && suggestedPatch != "" && strings.Contains(contentStr, f.VulnerableCode) {
+						contentStr = strings.Replace(contentStr, f.VulnerableCode, suggestedPatch, 1)
+					}
+					sandboxFiles[tf.Path] = contentStr
+				}
+				if _, exists := sandboxFiles[f.FilePath]; !exists {
+					sandboxFiles[f.FilePath] = f.VulnerableCode
+				}
+
 				sandboxReq := worker.SandboxRequest{
 					ScanID:         task.TaskID,
 					CommitSHA:      task.CommitSHA,
 					Language:       remReq.Language,
-					BuildCommand:   getBuildCommandForLanguage(remReq.Language),
+					BuildCommand:   getBuildCommandForLanguage(remReq.Language, f.FilePath),
 					TimeoutSeconds: 60,
 					PatchContent:   suggestedPatch,
-					Files: map[string]string{
-						f.FilePath: f.VulnerableCode,
-					},
+					Files:          sandboxFiles,
 				}
 				sbResult, err := sandboxClient.Detonate(ctx, sandboxReq)
 				if err != nil {

@@ -62,7 +62,12 @@ REMEDIATE_RESP=$(curl -s -X POST "http://localhost:8000/remediate" \
   }')
 
 if echo "$REMEDIATE_RESP" | grep -q "suggested_patch" && echo "$REMEDIATE_RESP" | grep -q "e2e-scan-001"; then
-    echo -e "${GREEN}PASSED (Valid CTR-005 returned)${NC}"
+    if echo "$REMEDIATE_RESP" | grep -q "deterministic-rule-fallback"; then
+        echo -e "${GREEN}PASSED (Valid CTR-005: Verified BR-002 Deterministic Fallback)${NC}"
+    else
+        MODEL_NAME=$(echo "$REMEDIATE_RESP" | grep -o '"model_name":"[^"]*' | cut -d'"' -f4 || echo "live-model")
+        echo -e "${GREEN}PASSED (Valid CTR-005: Live Model ${MODEL_NAME})${NC}"
+    fi
 else
     echo -e "${RED}FAILED${NC}"
     echo "Response: $REMEDIATE_RESP"
