@@ -178,6 +178,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl enable lucid.service
+systemctl start --no-block lucid.service
 
 echo "=================================================="
 echo "Lucid-CI Host Provisioning Complete!"
