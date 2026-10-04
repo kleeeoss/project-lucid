@@ -19,3 +19,7 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# Terraform plan binary files
+*.tfplan
+tfplan
