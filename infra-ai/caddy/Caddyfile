@@ -3,7 +3,7 @@
 # • If $DOMAIN is set (e.g. lucid-demo.duckdns.org): binds to domain and issues TLS cert
 # • If $DOMAIN is empty: binds to :80 (plain HTTP on bare Elastic IP)
 
-{$DOMAIN::80} {
+{$DOMAIN} {
     log {
         output stdout
         format json
