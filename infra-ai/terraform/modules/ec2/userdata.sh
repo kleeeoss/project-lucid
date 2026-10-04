@@ -155,6 +155,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable lucid-autostop.service
+systemctl start lucid-autostop.service
 
 # 6. Configure Systemd Auto-Start for Docker Compose Stack
 cat <<'EOF' > /etc/systemd/system/lucid.service
