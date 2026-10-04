@@ -196,6 +196,17 @@ class SandboxOrchestrator:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(content, encoding="utf-8")
 
+            # Apply patch diff if provided (unified diff or git patch)
+            if request.patch_content and ("--- " in request.patch_content or "diff --git" in request.patch_content):
+                try:
+                    subprocess.run(["git", "init"], cwd=str(workspace_dir), check=False, capture_output=True)
+                    patch_file = workspace_dir / ".lucid_remediation.patch"
+                    patch_file.write_text(request.patch_content, encoding="utf-8")
+                    subprocess.run(["git", "apply", str(patch_file)], cwd=str(workspace_dir), check=False, capture_output=True)
+                    patch_file.unlink(missing_ok=True)
+                except Exception as patch_err:
+                    logger.warning("in_memory_patch_apply_failed", error=str(patch_err))
+
         # Ingress Mode B: Shallow Git clone on the host
         elif request.repository_url:
             clone_cmd = ["git", "clone", "--depth=1", request.repository_url, str(workspace_dir)]
