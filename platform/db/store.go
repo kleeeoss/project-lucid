@@ -108,10 +108,13 @@ func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error
 	// Support deterministic caller-provided scan UUID (e.g. task.TaskID) or generate fresh UUID
 	query := `
 		INSERT INTO scan_runs (id, repository_id, pr_number, commit_sha, status, findings_count, started_at)
-		VALUES (COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, NOW())
+		VALUES (COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()), $2, $3, $4, $5::scan_status, $6, NOW())
 		ON CONFLICT (id) DO UPDATE
 		SET status = EXCLUDED.status,
-		    findings_count = EXCLUDED.findings_count
+		    findings_count = EXCLUDED.findings_count,
+		    completed_at = NULL,
+		    scan_duration_ms = NULL,
+		    started_at = NOW()
 		RETURNING id, started_at;
 	`
 	err := s.pool.QueryRow(ctx, query,
@@ -131,10 +134,10 @@ func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error
 func (s *pgStore) UpdateScanRunStatus(ctx context.Context, scanID string, status models.ScanStatus, findingsCount int, durationMs *int) error {
 	query := `
 		UPDATE scan_runs
-		SET status = $1,
-		    findings_count = $2,
-		    scan_duration_ms = $3,
-		    completed_at = CASE WHEN $1 IN ('COMPLETED', 'FAILED') THEN NOW() ELSE completed_at END
+		SET status = $1::scan_status,
+		    findings_count = CASE WHEN $1::text = 'FAILED' AND $2 = 0 THEN findings_count ELSE $2 END,
+		    scan_duration_ms = CASE WHEN $1::text IN ('COMPLETED', 'FAILED') THEN COALESCE($3, scan_duration_ms) ELSE NULL END,
+		    completed_at = CASE WHEN $1::text IN ('COMPLETED', 'FAILED') THEN NOW() ELSE NULL END
 		WHERE id = $4::uuid;
 	`
 	tag, err := s.pool.Exec(ctx, query, status, findingsCount, durationMs, scanID)
@@ -153,9 +156,12 @@ func (s *pgStore) UpdateCheckRunID(ctx context.Context, scanID string, checkRunI
 		SET check_run_id = $1
 		WHERE id = $2::uuid;
 	`
-	_, err := s.pool.Exec(ctx, query, checkRunID, scanID)
+	tag, err := s.pool.Exec(ctx, query, checkRunID, scanID)
 	if err != nil {
 		return fmt.Errorf("UpdateCheckRunID: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("UpdateCheckRunID: scan_run %s not found", scanID)
 	}
 	return nil
 }
