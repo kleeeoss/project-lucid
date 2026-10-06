@@ -66,7 +66,13 @@ try:
 except Exception:
     data = {}
 runtimes = data.get("runtimes", {})
-runtimes["runsc"] = {"path": "/usr/bin/runsc"}
+runtimes["runsc"] = {
+    "path": "/usr/bin/runsc",
+    "runtimeArgs": [
+        "--network=none",
+        "--platform=ptrace"
+    ]
+}
 data["runtimes"] = runtimes
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
