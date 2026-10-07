@@ -59,3 +59,15 @@ def test_userdata_autostop_imdsv2_and_bounds():
     assert "-le 480" in content
     # Shutdown call
     assert 'shutdown -h "+${RUNTIME_MINUTES}"' in content
+
+
+def test_userdata_runsc_network_none_runtime_args():
+    """Verify that userdata.sh registers runsc with runtimeArgs: ['--network=none', '--platform=ptrace']."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    userdata_path = repo_root / "infra-ai" / "terraform" / "modules" / "ec2" / "userdata.sh"
+    content = userdata_path.read_text(encoding="utf-8")
+
+    assert '"runtimeArgs"' in content and '"--network=none"' in content and '"--platform=ptrace"' in content, (
+        "userdata.sh must configure runsc with runtimeArgs: ['--network=none', '--platform=ptrace'] to prevent root netns errors and kernel hangs"
+    )
+

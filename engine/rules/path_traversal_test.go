@@ -69,3 +69,33 @@ func TestDetectPathTraversalCleanConstantPath(t *testing.T) {
 		t.Fatalf("constant path should not produce finding: %+v", vulns)
 	}
 }
+
+func TestDetectPathTraversalJavaScriptReadFileSync(t *testing.T) {
+	source := []byte(`const express = require("express");
+const app = express();
+app.get("/download", (req, res) => {
+	const file = req.query.file;
+	fs.readFileSync("/var/www/" + file);
+});`)
+
+	vulns, err := DetectPathTraversal("app.js", source)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(vulns) != 1 {
+		t.Fatalf("expected 1 vulnerability, got %d", len(vulns))
+	}
+
+	if vulns[0].RuleID != PathTraversalRuleID {
+		t.Fatalf("expected rule %s, got %s", PathTraversalRuleID, vulns[0].RuleID)
+	}
+
+	if vulns[0].CWE != PathTraversalCWE {
+		t.Fatalf("expected CWE %s, got %s", PathTraversalCWE, vulns[0].CWE)
+	}
+
+	if vulns[0].SinkNode.Name != "fs.readFileSync" {
+		t.Fatalf("expected sink fs.readFileSync, got %s", vulns[0].SinkNode.Name)
+	}
+}

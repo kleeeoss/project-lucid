@@ -100,23 +100,41 @@ class SandboxOrchestrator:
             if settings.SANDBOX_RUNTIME:
                 container_kwargs["runtime"] = settings.SANDBOX_RUNTIME
 
+            def _is_runtime_error(err: Exception) -> bool:
+                err_str = str(err).lower()
+                return any(term in err_str for term in (
+                    "unknown runtime",
+                    "invalid runtime",
+                    "oci runtime",
+                    "runtime start failed",
+                    "root network namespace",
+                ))
+
             try:
                 container = client.containers.create(**container_kwargs)
-            except APIError as create_err:
-                # If runsc is requested but not installed (e.g. dev machine), fallback gracefully
-                if settings.SANDBOX_RUNTIME and any(term in str(create_err).lower() for term in ("unknown runtime", "invalid runtime")):
+                container.start()
+            except APIError as runtime_err:
+                # If custom runtime (runsc) fails at create or start, fallback gracefully to runc
+                if settings.SANDBOX_RUNTIME and _is_runtime_error(runtime_err):
                     logger.warning(
                         "sandbox_runtime_unavailable_falling_back",
                         requested_runtime=settings.SANDBOX_RUNTIME,
                         fallback="runc",
-                        error=str(create_err),
+                        error=str(runtime_err),
                     )
-                    container_kwargs.pop("runtime", None)
-                    container = client.containers.create(**container_kwargs)
+                    if container is not None:
+                        try:
+                            container.remove(force=True)
+                        except Exception:
+                            pass
+                        container = None
+
+                    fallback_kwargs = container_kwargs.copy()
+                    fallback_kwargs.pop("runtime", None)
+                    container = client.containers.create(**fallback_kwargs)
+                    container.start()
                 else:
                     raise
-
-            container.start()
 
             # 3. Wait for process completion under watchdog timer
             status = "PASSED"
