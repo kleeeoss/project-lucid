@@ -21,7 +21,7 @@ services:
     networks:
       - lucid-net
 
-  # 2. LocalStack (Community 3.8.1 — No account or license token required)
+  # 2. LocalStack (AWS SQS Mock)
   localstack:
     image: localstack/localstack:3.8.1
     container_name: lucid-localstack
@@ -76,6 +76,10 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_ENDPOINT_URL=http://localstack:4566
       - AI_SERVICE_URL=http://ai-service:8000
+      - GITHUB_APP_ID=5059688
+      - GITHUB_PRIVATE_KEY_PATH=/app/platform/config/github-app.private-key.pem
+    volumes:
+      - ./platform/config:/app/platform/config:ro
     depends_on:
       postgres:
         condition: service_healthy

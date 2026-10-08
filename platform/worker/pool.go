@@ -18,9 +18,20 @@ import (
 // TaskHandler is the function signature executed per scan task.
 type TaskHandler func(ctx context.Context, task models.ScanTaskMessage) error
 
+// SQSClient abstracts the AWS SQS operations used by Pool.
+type SQSClient interface {
+	ReceiveMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+}
+
+type queuedJob struct {
+	task          models.ScanTaskMessage
+	receiptHandle string
+}
+
 // Pool manages a bounded goroutine worker pool consuming from AWS SQS.
 type Pool struct {
-	client      *sqs.Client
+	client      SQSClient
 	queueURL    string
 	store       db.Store
 	logger      *slog.Logger
@@ -30,7 +41,7 @@ type Pool struct {
 }
 
 // NewPool initializes a Worker Pool with configured concurrency and dependencies.
-func NewPool(client *sqs.Client, queueURL string, store db.Store, concurrency int, logger *slog.Logger, handler TaskHandler) *Pool {
+func NewPool(client SQSClient, queueURL string, store db.Store, concurrency int, logger *slog.Logger, handler TaskHandler) *Pool {
 	if concurrency <= 0 {
 		concurrency = 3
 	}
@@ -51,7 +62,7 @@ func (p *Pool) Start(ctx context.Context) {
 		"queue_url", p.queueURL,
 	)
 
-	taskChan := make(chan *models.ScanTaskMessage, p.concurrency*2)
+	taskChan := make(chan queuedJob, p.concurrency*2)
 
 	// Launch worker goroutines
 	for i := 1; i <= p.concurrency; i++ {
@@ -68,7 +79,7 @@ func (p *Pool) Start(ctx context.Context) {
 	p.logger.Info("Platform Worker Pool stopped cleanly")
 }
 
-func (p *Pool) dispatcherLoop(ctx context.Context, taskChan chan<- *models.ScanTaskMessage) {
+func (p *Pool) dispatcherLoop(ctx context.Context, taskChan chan<- queuedJob) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -91,17 +102,27 @@ func (p *Pool) dispatcherLoop(ctx context.Context, taskChan chan<- *models.ScanT
 			}
 
 			for _, msg := range output.Messages {
+				receiptHandle := ""
+				if msg.ReceiptHandle != nil {
+					receiptHandle = *msg.ReceiptHandle
+				}
+
 				var task models.ScanTaskMessage
 				if err := json.Unmarshal([]byte(*msg.Body), &task); err != nil {
 					p.logger.Error("Failed to unmarshal SQS scan message body", "error", err)
 					// Delete poisoned message to prevent infinite queue loops
-					p.deleteSQSMessage(ctx, *msg.ReceiptHandle)
+					p.deleteSQSMessage(ctx, receiptHandle)
 					continue
+				}
+
+				job := queuedJob{
+					task:          task,
+					receiptHandle: receiptHandle,
 				}
 
 				// Dispatch task to worker channel
 				select {
-				case taskChan <- &task:
+				case taskChan <- job:
 				case <-ctx.Done():
 					return
 				}
@@ -110,26 +131,26 @@ func (p *Pool) dispatcherLoop(ctx context.Context, taskChan chan<- *models.ScanT
 	}
 }
 
-func (p *Pool) workerLoop(ctx context.Context, workerID int, taskChan <-chan *models.ScanTaskMessage) {
+func (p *Pool) workerLoop(ctx context.Context, workerID int, taskChan <-chan queuedJob) {
 	defer p.wg.Done()
 	p.logger.Debug("Worker goroutine started", "worker_id", workerID)
 
-	for task := range taskChan {
-		p.processTaskSafely(ctx, workerID, *task)
+	for job := range taskChan {
+		p.processTaskSafely(ctx, workerID, job)
 	}
 }
 
-func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.ScanTaskMessage) {
+func (p *Pool) processTaskSafely(ctx context.Context, workerID int, job queuedJob) {
 	// Panic recovery guard per scan execution
 	defer func() {
 		if r := recover(); r != nil {
 			p.logger.Error("Worker goroutine panic recovered",
 				"worker_id", workerID,
-				"task_id", task.TaskID,
+				"task_id", job.task.TaskID,
 				"panic", r,
 			)
 			if p.store != nil {
-				if err := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, nil); err != nil {
+				if err := p.store.UpdateScanRunStatus(ctx, job.task.TaskID, models.ScanStatusFailed, 0, nil); err != nil {
 					p.logger.Error("Failed to update scan run status on panic", "error", err)
 				}
 			}
@@ -139,27 +160,27 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 	start := time.Now()
 	p.logger.Info("Worker picked up scan task",
 		"worker_id", workerID,
-		"task_id", task.TaskID,
-		"repo", task.RepositoryName,
-		"pr", task.PRNumber,
-		"commit", task.CommitSHA,
+		"task_id", job.task.TaskID,
+		"repo", job.task.RepositoryName,
+		"pr", job.task.PRNumber,
+		"commit", job.task.CommitSHA,
 	)
 
 	var err error
 	if p.handler != nil {
-		err = p.handler(ctx, task)
+		err = p.handler(ctx, job.task)
 	}
 
 	durationMs := int(time.Since(start).Milliseconds())
 
 	if err != nil {
 		p.logger.Error("Scan task failed",
-			"task_id", task.TaskID,
+			"task_id", job.task.TaskID,
 			"duration_ms", durationMs,
 			"error", err,
 		)
 		if p.store != nil {
-			if updateErr := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusFailed, 0, &durationMs); updateErr != nil {
+			if updateErr := p.store.UpdateScanRunStatus(ctx, job.task.TaskID, models.ScanStatusFailed, 0, &durationMs); updateErr != nil {
 				p.logger.Error("Failed to update scan run status to FAILED", "error", updateErr)
 			}
 		}
@@ -167,17 +188,23 @@ func (p *Pool) processTaskSafely(ctx context.Context, workerID int, task models.
 	}
 
 	p.logger.Info("Scan task completed successfully",
-		"task_id", task.TaskID,
+		"task_id", job.task.TaskID,
 		"duration_ms", durationMs,
 	)
 	if p.store != nil {
-		if updateErr := p.store.UpdateScanRunStatus(ctx, task.TaskID, models.ScanStatusCompleted, 1, &durationMs); updateErr != nil {
+		if updateErr := p.store.UpdateScanRunStatus(ctx, job.task.TaskID, models.ScanStatusCompleted, 1, &durationMs); updateErr != nil {
 			p.logger.Error("Failed to update scan run status to COMPLETED", "error", updateErr)
+			return
 		}
 	}
+
+	p.deleteSQSMessage(ctx, job.receiptHandle)
 }
 
 func (p *Pool) deleteSQSMessage(ctx context.Context, receiptHandle string) {
+	if p.client == nil || receiptHandle == "" {
+		return
+	}
 	_, err := p.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(p.queueURL),
 		ReceiptHandle: aws.String(receiptHandle),
