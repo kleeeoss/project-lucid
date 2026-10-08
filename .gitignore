@@ -2,6 +2,13 @@
 .DS_Store
 Thumbs.db
 
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
 # Environment and Secrets (CRITICAL)
 .env
 .env.*

@@ -24,6 +24,7 @@ func NewRouter(logger *slog.Logger, producer SQSProducer) *Router {
 
 func (r *Router) routes() {
 	r.mux.HandleFunc("/healthz", r.handleHealthz)
+	r.mux.HandleFunc("/health", r.handleHealthz) // Matches Caddyfile reverse_proxy handle /health
 	r.mux.HandleFunc("/webhook", r.webhookHandler.HandleWebhook)
 }
 

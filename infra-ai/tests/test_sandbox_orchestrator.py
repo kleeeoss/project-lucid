@@ -6,11 +6,27 @@ Verifies passing execution, failures, 60s watchdog timeouts, and guaranteed clea
 import os
 from pathlib import Path
 import pytest
+import docker
+from docker.errors import DockerException
 from models.schemas import SandboxRequest
 from sandbox.orchestrator import SandboxOrchestrator
 from service.config import settings
 
+
+def is_docker_available() -> bool:
+    """Safely checks if Docker daemon is available and responding."""
+    try:
+        client = docker.from_env()
+        client.ping()
+        return True
+    except (DockerException, Exception):
+        return False
+
+
+pytestmark = pytest.mark.skipif(not is_docker_available(), reason="Docker daemon unreachable or not running")
+
 orchestrator = SandboxOrchestrator()
+
 
 
 @pytest.mark.asyncio

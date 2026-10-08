@@ -77,26 +77,64 @@ class SandboxOrchestrator:
                 container_name=container_name,
                 command=request.build_command,
                 timeout=request.timeout_seconds,
+                runtime=settings.SANDBOX_RUNTIME,
             )
 
             # Command executes via entrypoint.sh in /workspace
             cmd_args = ["/bin/bash", "-c", request.build_command]
 
-            container = client.containers.create(
-                image=settings.SANDBOX_IMAGE_TAG,
-                name=container_name,
-                command=cmd_args,
-                volumes={str(workspace_dir): {"bind": "/workspace", "mode": "rw"}},
-                network_mode="none",
-                mem_limit=settings.SANDBOX_MEMORY_LIMIT,
-                nano_cpus=nano_cpus,
-                pids_limit=settings.SANDBOX_PID_LIMIT,
-                read_only=True,
-                tmpfs={"/tmp": "rw,noexec,nosuid,size=64m"},
-                user="10001:10001",
-            )
+            container_kwargs = {
+                "image": settings.SANDBOX_IMAGE_TAG,
+                "name": container_name,
+                "command": cmd_args,
+                "volumes": {str(workspace_dir): {"bind": "/workspace", "mode": "rw"}},
+                "network_mode": "none",
+                "mem_limit": settings.SANDBOX_MEMORY_LIMIT,
+                "nano_cpus": nano_cpus,
+                "pids_limit": settings.SANDBOX_PID_LIMIT,
+                "read_only": True,
+                "tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},
+                "user": "10001:10001",
+            }
 
-            container.start()
+            if settings.SANDBOX_RUNTIME:
+                container_kwargs["runtime"] = settings.SANDBOX_RUNTIME
+
+            def _is_runtime_error(err: Exception) -> bool:
+                err_str = str(err).lower()
+                return any(term in err_str for term in (
+                    "unknown runtime",
+                    "invalid runtime",
+                    "oci runtime",
+                    "runtime start failed",
+                    "root network namespace",
+                ))
+
+            try:
+                container = client.containers.create(**container_kwargs)
+                container.start()
+            except APIError as runtime_err:
+                # If custom runtime (runsc) fails at create or start, fallback gracefully to runc
+                if settings.SANDBOX_RUNTIME and _is_runtime_error(runtime_err):
+                    logger.warning(
+                        "sandbox_runtime_unavailable_falling_back",
+                        requested_runtime=settings.SANDBOX_RUNTIME,
+                        fallback="runc",
+                        error=str(runtime_err),
+                    )
+                    if container is not None:
+                        try:
+                            container.remove(force=True)
+                        except Exception:
+                            pass
+                        container = None
+
+                    fallback_kwargs = container_kwargs.copy()
+                    fallback_kwargs.pop("runtime", None)
+                    container = client.containers.create(**fallback_kwargs)
+                    container.start()
+                else:
+                    raise
 
             # 3. Wait for process completion under watchdog timer
             status = "PASSED"
@@ -175,6 +213,17 @@ class SandboxOrchestrator:
                 dest = workspace_dir / file_path
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(content, encoding="utf-8")
+
+            # Apply patch diff if provided (unified diff or git patch)
+            if request.patch_content and ("--- " in request.patch_content or "diff --git" in request.patch_content):
+                try:
+                    subprocess.run(["git", "init"], cwd=str(workspace_dir), check=False, capture_output=True)
+                    patch_file = workspace_dir / ".lucid_remediation.patch"
+                    patch_file.write_text(request.patch_content, encoding="utf-8")
+                    subprocess.run(["git", "apply", str(patch_file)], cwd=str(workspace_dir), check=False, capture_output=True)
+                    patch_file.unlink(missing_ok=True)
+                except Exception as patch_err:
+                    logger.warning("in_memory_patch_apply_failed", error=str(patch_err))
 
         # Ingress Mode B: Shallow Git clone on the host
         elif request.repository_url:

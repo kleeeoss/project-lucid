@@ -1,0 +1,163 @@
+services:
+  # ============================================================================
+  # 1. Caddy Reverse Proxy (Public Perimeter with Auto-TLS or HTTP)
+  # ============================================================================
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: lucid-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-:80}
+    volumes:
+      - ./infra-ai/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /var/lib/lucid/data/caddy:/data       # Persistent Let's Encrypt certificates
+      - /var/lib/lucid/config/caddy:/config   # Persistent Caddy runtime state
+    depends_on:
+      - platform
+      - ai-service
+      - dashboard
+    networks:
+      - lucid-net
+
+  # ============================================================================
+  # 2. PostgreSQL (Persistent State on Host EBS)
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: lucid-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lucid_ci}
+      POSTGRES_USER: ${POSTGRES_USER:-lucid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lucid_dev}
+    volumes:
+      - /var/lib/lucid/data/postgres:/var/lib/postgresql/data
+      - ./platform/db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lucid} -d ${POSTGRES_DB:-lucid_ci}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - lucid-net
+
+  # ============================================================================
+  # 3. Platform Webhook & API Server (Go HTTP Daemon)
+  # ============================================================================
+  platform:
+    build:
+      context: .
+      dockerfile: platform/Dockerfile.server
+    container_name: lucid-platform
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://${POSTGRES_USER:-lucid}:${POSTGRES_PASSWORD:-lucid_dev}@postgres:5432/${POSTGRES_DB:-lucid_ci}?sslmode=disable
+      - SQS_QUEUE_URL=${SQS_QUEUE_URL:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+      - AWS_REGION=${AWS_REGION:-ap-southeast-2}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-southeast-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - lucid-net
+
+  # ============================================================================
+  # 4. Platform Worker Daemon (Async Scanner & Orchestrator)
+  # ============================================================================
+  platform-worker:
+    build:
+      context: .
+      dockerfile: platform/Dockerfile.worker
+    container_name: lucid-worker
+    restart: unless-stopped
+    environment:
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-3}
+      - DATABASE_URL=postgres://${POSTGRES_USER:-lucid}:${POSTGRES_PASSWORD:-lucid_dev}@postgres:5432/${POSTGRES_DB:-lucid_ci}?sslmode=disable
+      - SQS_QUEUE_URL=${SQS_QUEUE_URL:-}
+      - AI_SERVICE_URL=http://ai-service:8000
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
+      - GITHUB_PRIVATE_KEY=${GITHUB_PRIVATE_KEY:-}
+      - GITHUB_PRIVATE_KEY_PATH=${GITHUB_PRIVATE_KEY_PATH:-}
+      - AWS_REGION=${AWS_REGION:-ap-southeast-2}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-southeast-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    networks:
+      - lucid-net
+
+  # ============================================================================
+  # 5. AI Remediation & Dynamic Sandbox Service (FastAPI)
+  # ============================================================================
+  ai-service:
+    build:
+      context: ./infra-ai
+      dockerfile: Dockerfile
+    container_name: lucid-ai-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - ENVIRONMENT=production
+      - AWS_REGION=${AWS_REGION:-ap-southeast-2}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-southeast-2}
+      - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-groq}
+      - LLM_FALLBACK_PROVIDER=${LLM_FALLBACK_PROVIDER:-gemini}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-20b}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - SANDBOX_IMAGE_TAG=lucid-sandbox-runner:latest
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runsc}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/lucid-sandboxes:/tmp/lucid-sandboxes
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - lucid-net
+
+  # ============================================================================
+  # 6. Next.js Dashboard Frontend
+  # ============================================================================
+  dashboard:
+    build:
+      context: .
+      dockerfile: platform/Dockerfile.web
+    container_name: lucid-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://${POSTGRES_USER:-lucid}:${POSTGRES_PASSWORD:-lucid_dev}@postgres:5432/${POSTGRES_DB:-lucid_ci}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lucid-net
+
+networks:
+  lucid-net:
+    name: lucid-net
+    driver: bridge

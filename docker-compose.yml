@@ -1,96 +1,93 @@
 services:
-  # 1. PostgreSQL 16
+  # ============================================================================
+  # 1. PostgreSQL Database (State, Scans, Vulnerabilities)
+  # ============================================================================
   postgres:
     image: postgres:16-alpine
     container_name: lucid-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: lucid_ci
-      POSTGRES_USER: lucid_user
-      POSTGRES_PASSWORD: lucid_password
+      POSTGRES_USER: lucid
+      POSTGRES_PASSWORD: lucid_dev
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./platform/db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+      - ./platform/db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U lucid_user -d lucid_ci" ]
+      test: ["CMD-SHELL", "pg_isready -U lucid -d lucid_ci"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 5
     networks:
       - lucid-net
 
-  # 2. LocalStack (AWS SQS Mock)
+  # ============================================================================
+  # 2. LocalStack (AWS SQS Mock Service)
+  # ============================================================================
   localstack:
-    image: localstack/localstack:3.8.1
+    image: localstack/localstack:3.4
     container_name: lucid-localstack
+    restart: unless-stopped
     ports:
       - "4566:4566"
     environment:
       - SERVICES=sqs
       - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
     volumes:
       - ./scripts/localstack:/etc/localstack/init/ready.d:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - lucid-net
 
-  # 3. Platform HTTP Server (Ingestion)
-  platform-server:
+  # ============================================================================
+  # 3. AI Remediation & Dynamic Sandbox Service (Python FastAPI)
+  # ============================================================================
+  ai-service:
     build:
-      context: .
-      dockerfile: platform/Dockerfile.server
-    container_name: lucid-platform-server
+      context: ./infra-ai
+      dockerfile: Dockerfile
+    container_name: lucid-ai-service
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "8000:8000"
     environment:
-      - PORT=8080
-      - LOG_LEVEL=info
-      - GITHUB_WEBHOOK_SECRET=dev_webhook_secret_12345
-      - SQS_QUEUE_URL=http://localstack:4566/000000000000/lucid-ci-scan-queue
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_ENDPOINT_URL=http://localstack:4566
-    depends_on:
-      localstack:
-        condition: service_started
-    networks:
-      - lucid-net
-
-  # 4. Platform Background Worker Daemon
-  platform-worker:
-    build:
-      context: .
-      dockerfile: platform/Dockerfile.worker
-    container_name: lucid-platform-worker
-    restart: unless-stopped
-    environment:
-      - WORKER_CONCURRENCY=3
-      - LOG_LEVEL=info
-      - DATABASE_URL=postgres://lucid_user:lucid_password@postgres:5432/lucid_ci?sslmode=disable
-      - SQS_QUEUE_URL=http://localstack:4566/000000000000/lucid-ci-scan-queue
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_ENDPOINT_URL=http://localstack:4566
-      - AI_SERVICE_URL=http://ai-service:8000
-      - GITHUB_APP_ID=5059688
-      - GITHUB_PRIVATE_KEY_PATH=/app/platform/config/github-app.private-key.pem
+      - PORT=8000
+      - HOST=0.0.0.0
+      - ENVIRONMENT=development
+      - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-groq}
+      - LLM_FALLBACK_PROVIDER=${LLM_FALLBACK_PROVIDER:-gemini}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-20b}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - SANDBOX_IMAGE_TAG=lucid-sandbox-runner:latest
     volumes:
-      - ./platform/config:/app/platform/config:ro
+      # Mount host docker socket so the orchestrator can launch runner containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/lucid-sandboxes:/tmp/lucid-sandboxes
     depends_on:
-      postgres:
-        condition: service_healthy
       localstack:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - lucid-net
-
-volumes:
-  postgres_data:
 
 networks:
   lucid-net:
+    name: lucid-net
     driver: bridge
+
+volumes:
+  postgres_data:

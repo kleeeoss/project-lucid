@@ -58,31 +58,31 @@ resource "aws_security_group" "lucid_host" {
   description = "Security group for Lucid-CI unified host (Caddy, Platform, AI)"
   vpc_id      = aws_vpc.main.id
 
-  # Inbound HTTP (port 80) for Caddy ACME challenge
+  # Inbound SSH (port 22) restricted to administrator CIDR
   ingress {
-    description = "HTTP for ACME TLS challenge"
+    description = "SSH for administrator shell access"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.admin_cidr]
+  }
+
+  # Inbound HTTP (port 80) for Caddy ACME challenge and bare IP access
+  ingress {
+    description = "HTTP for ACME TLS challenge and bare IP traffic"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Inbound HTTPS (port 443) for GitHub Webhooks
+  # Inbound HTTPS (port 443) for GitHub Webhooks and Dashboard
   ingress {
     description = "HTTPS for GitHub Webhooks and Dashboard"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Inbound SSH (port 22) for administrator access
-  ingress {
-    description = "SSH for administration"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
   }
 
   # Outbound: full egress permitted (needed for Docker builds, Groq/Gemini APIs, GitHub API)

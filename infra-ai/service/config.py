@@ -37,6 +37,7 @@ class Settings(BaseSettings):
 
     # Sandbox Configuration
     SANDBOX_IMAGE_TAG: str = "lucid-sandbox-runner:latest"
+    SANDBOX_RUNTIME: str = "runsc"  # gVisor runtime (runsc) or runc fallback
     SANDBOX_MEMORY_LIMIT: str = "512m"
     SANDBOX_CPU_LIMIT: float = 1.0
     SANDBOX_PID_LIMIT: int = 100

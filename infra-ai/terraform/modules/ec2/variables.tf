@@ -1,7 +1,13 @@
 variable "instance_type" {
   type        = string
-  default     = "t3.xlarge"
-  description = "EC2 instance size (Primary V1 baseline: t3.xlarge, Fallback: c6i.large)"
+  default     = "m7i-flex.large"
+  description = "EC2 instance size"
+}
+
+variable "volume_size" {
+  type        = number
+  default     = 30
+  description = "Root gp3 EBS volume size in GB"
 }
 
 variable "subnet_id" {
@@ -27,6 +33,6 @@ variable "key_name" {
 
 variable "environment" {
   type        = string
-  default     = "development"
+  default     = "showcase"
   description = "Environment identifier tag"
 }

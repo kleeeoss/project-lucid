@@ -26,6 +26,7 @@ func TestCatalogIdentifiesSinks(t *testing.T) {
 		"child_process.exec": SinkCommand,
 		"os.system":          SinkCommand,
 		"fs.readFile":        SinkFile,
+		"fs.readFileSync": SinkFile,
 		"open":               SinkFile,
 	}
 	for name, want := range cases {

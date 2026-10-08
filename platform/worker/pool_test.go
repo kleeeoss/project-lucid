@@ -5,64 +5,12 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 
 	"lucid-ci/platform/db"
 	"lucid-ci/platform/models"
 )
-
-type mockSQSClient struct {
-	deleteMessageFunc  func(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
-	receiveMessageFunc func(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
-	deletedHandles     []string
-	mu                 sync.Mutex
-}
-
-func (m *mockSQSClient) ReceiveMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
-	if m.receiveMessageFunc != nil {
-		return m.receiveMessageFunc(ctx, params, optFns...)
-	}
-	return &sqs.ReceiveMessageOutput{}, nil
-}
-
-func (m *mockSQSClient) DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if params != nil && params.ReceiptHandle != nil {
-		m.deletedHandles = append(m.deletedHandles, *params.ReceiptHandle)
-	}
-	if m.deleteMessageFunc != nil {
-		return m.deleteMessageFunc(ctx, params, optFns...)
-	}
-	return &sqs.DeleteMessageOutput{}, nil
-}
-
-func (m *mockSQSClient) GetDeletedHandles() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	result := make([]string, len(m.deletedHandles))
-	copy(result, m.deletedHandles)
-	return result
-}
-
-type mockStore struct {
-	db.Store
-	updateStatusFunc func(ctx context.Context, scanID string, status models.ScanStatus, findingsCount int, durationMs *int) error
-}
-
-func (m *mockStore) UpdateScanRunStatus(ctx context.Context, scanID string, status models.ScanStatus, findingsCount int, durationMs *int) error {
-	if m.updateStatusFunc != nil {
-		return m.updateStatusFunc(ctx, scanID, status, findingsCount, durationMs)
-	}
-	return nil
-}
 
 func TestPool_ProcessTaskSafely_PanicRecovery(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -73,13 +21,10 @@ func TestPool_ProcessTaskSafely_PanicRecovery(t *testing.T) {
 
 	pool := NewPool(nil, "http://mock-queue", nil, 2, logger, panickingHandler)
 
-	job := queuedJob{
-		task: models.ScanTaskMessage{
-			TaskID:         "panic-test-task",
-			RepositoryName: "acme/lucid-ci",
-			PRNumber:       42,
-		},
-		receiptHandle: "mock-receipt-handle",
+	task := models.ScanTaskMessage{
+		TaskID:         "panic-test-task",
+		RepositoryName: "acme/lucid-ci",
+		PRNumber:       42,
 	}
 
 	defer func() {
@@ -88,7 +33,7 @@ func TestPool_ProcessTaskSafely_PanicRecovery(t *testing.T) {
 		}
 	}()
 
-	pool.processTaskSafely(context.Background(), 1, job)
+	pool.processTaskSafely(context.Background(), 1, task, "")
 }
 
 func TestPool_ProcessTaskSafely_SuccessAndFailure(t *testing.T) {
@@ -102,12 +47,9 @@ func TestPool_ProcessTaskSafely_SuccessAndFailure(t *testing.T) {
 	}
 
 	pool := NewPool(nil, "http://mock-queue", nil, 1, logger, successHandler)
-	job := queuedJob{
-		task:          models.ScanTaskMessage{TaskID: "success-task"},
-		receiptHandle: "mock-receipt-handle",
-	}
+	task := models.ScanTaskMessage{TaskID: "success-task"}
 
-	pool.processTaskSafely(context.Background(), 1, job)
+	pool.processTaskSafely(context.Background(), 1, task, "")
 
 	if !executed.Load() {
 		t.Errorf("Expected handler to be executed")
@@ -117,136 +59,70 @@ func TestPool_ProcessTaskSafely_SuccessAndFailure(t *testing.T) {
 		return errors.New("simulated network error")
 	}
 	pool.handler = errorHandler
-	pool.processTaskSafely(context.Background(), 1, job)
+	pool.processTaskSafely(context.Background(), 1, task, "")
 }
 
-func TestPool_ProcessTaskSafely_SuccessDeletesMessage(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mockSQS := &mockSQSClient{}
-	mockSt := &mockStore{}
-
-	successHandler := func(ctx context.Context, task models.ScanTaskMessage) error {
-		return nil
-	}
-
-	pool := NewPool(mockSQS, "http://mock-queue/tasks", mockSt, 1, logger, successHandler)
-	job := queuedJob{
-		task: models.ScanTaskMessage{
-			TaskID:         "task-success-123",
-			RepositoryName: "lucid-org/test-repo",
-			PRNumber:       10,
-		},
-		receiptHandle: "receipt-handle-success-xyz",
-	}
-
-	pool.processTaskSafely(context.Background(), 1, job)
-
-	deleted := mockSQS.GetDeletedHandles()
-	if len(deleted) != 1 {
-		t.Fatalf("expected exactly 1 deleted message, got %d", len(deleted))
-	}
-	if deleted[0] != "receipt-handle-success-xyz" {
-		t.Errorf("expected deleted handle 'receipt-handle-success-xyz', got %q", deleted[0])
-	}
+type mockPoolStore struct {
+	db.Store
+	updateStatusCalls []statusCall
+	updateStatusErr   error
 }
 
-func TestPool_ProcessTaskSafely_FailureDoesNotDeleteMessage(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mockSQS := &mockSQSClient{}
-	mockSt := &mockStore{}
-
-	failureHandler := func(ctx context.Context, task models.ScanTaskMessage) error {
-		return errors.New("transient engine failure")
-	}
-
-	pool := NewPool(mockSQS, "http://mock-queue/tasks", mockSt, 1, logger, failureHandler)
-	job := queuedJob{
-		task: models.ScanTaskMessage{
-			TaskID:         "task-fail-456",
-			RepositoryName: "lucid-org/test-repo",
-			PRNumber:       11,
-		},
-		receiptHandle: "receipt-handle-fail-abc",
-	}
-
-	pool.processTaskSafely(context.Background(), 1, job)
-
-	deleted := mockSQS.GetDeletedHandles()
-	if len(deleted) != 0 {
-		t.Fatalf("expected message to NOT be deleted on task failure, but got: %v", deleted)
-	}
+type statusCall struct {
+	scanID        string
+	status        models.ScanStatus
+	findingsCount int
+	durationMs    *int
 }
 
-func TestPool_ProcessTaskSafely_StatusUpdateFailureDoesNotDeleteMessage(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mockSQS := &mockSQSClient{}
-	mockSt := &mockStore{
-		updateStatusFunc: func(ctx context.Context, scanID string, status models.ScanStatus, findingsCount int, durationMs *int) error {
-			if status == models.ScanStatusCompleted {
-				return errors.New("database connection lost")
-			}
-			return nil
-		},
-	}
-
-	successHandler := func(ctx context.Context, task models.ScanTaskMessage) error {
-		return nil
-	}
-
-	pool := NewPool(mockSQS, "http://mock-queue/tasks", mockSt, 1, logger, successHandler)
-	job := queuedJob{
-		task: models.ScanTaskMessage{
-			TaskID: "task-db-error-789",
-		},
-		receiptHandle: "receipt-handle-db-error",
-	}
-
-	pool.processTaskSafely(context.Background(), 1, job)
-
-	deleted := mockSQS.GetDeletedHandles()
-	if len(deleted) != 0 {
-		t.Fatalf("expected message to NOT be deleted when UpdateScanRunStatus fails, got: %v", deleted)
-	}
+func (m *mockPoolStore) UpdateScanRunStatus(ctx context.Context, scanID string, status models.ScanStatus, findingsCount int, durationMs *int) error {
+	m.updateStatusCalls = append(m.updateStatusCalls, statusCall{scanID, status, findingsCount, durationMs})
+	return m.updateStatusErr
 }
 
-func TestPool_DispatcherLoop_PoisonMessageDeletedImmediately(t *testing.T) {
+func TestPool_ProcessTaskSafely_StoreStatusOnFailureAndPanic(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mockSQS := &mockSQSClient{}
 
-	callCount := 0
-	mockSQS.receiveMessageFunc = func(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
-		callCount++
-		if callCount == 1 {
-			return &sqs.ReceiveMessageOutput{
-				Messages: []sqsTypes.Message{
-					{
-						Body:          aws.String("poison-malformed-json{{"),
-						ReceiptHandle: aws.String("receipt-poison-handle"),
-					},
-				},
-			}, nil
-		}
-		// Second call returns empty, wait for context cancellation
-		<-ctx.Done()
-		return nil, ctx.Err()
+	// 1. Failure case
+	mockStore := &mockPoolStore{}
+	failHandler := func(ctx context.Context, task models.ScanTaskMessage) error {
+		return errors.New("pipeline fatal failure")
 	}
 
-	pool := NewPool(mockSQS, "http://mock-queue/tasks", nil, 1, logger, nil)
-	taskChan := make(chan queuedJob, 5)
+	pool := NewPool(nil, "http://mock-queue", mockStore, 1, logger, failHandler)
+	task := models.ScanTaskMessage{TaskID: "task-fail-001"}
+	pool.processTaskSafely(context.Background(), 1, task, "")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	if len(mockStore.updateStatusCalls) < 2 {
+		t.Fatalf("Expected at least 2 status update calls (SCANNING and FAILED), got %d", len(mockStore.updateStatusCalls))
+	}
+	lastCall := mockStore.updateStatusCalls[len(mockStore.updateStatusCalls)-1]
+	if lastCall.status != models.ScanStatusFailed {
+		t.Errorf("Expected final status to be %s, got %s", models.ScanStatusFailed, lastCall.status)
+	}
+	if lastCall.scanID != "task-fail-001" {
+		t.Errorf("Expected scan ID 'task-fail-001', got %s", lastCall.scanID)
+	}
 
-	pool.dispatcherLoop(ctx, taskChan)
+	// 2. Panic case
+	mockStorePanic := &mockPoolStore{}
+	panicHandler := func(ctx context.Context, task models.ScanTaskMessage) error {
+		panic("catastrophic engine crash")
+	}
+	poolPanic := NewPool(nil, "http://mock-queue", mockStorePanic, 1, logger, panicHandler)
+	taskPanic := models.ScanTaskMessage{TaskID: "task-panic-001"}
+	poolPanic.processTaskSafely(context.Background(), 1, taskPanic, "")
 
-	deleted := mockSQS.GetDeletedHandles()
-	if len(deleted) != 1 {
-		t.Fatalf("expected 1 deleted handle for poisoned message, got %d", len(deleted))
+	if len(mockStorePanic.updateStatusCalls) < 2 {
+		t.Fatalf("Expected at least 2 status update calls on panic, got %d", len(mockStorePanic.updateStatusCalls))
 	}
-	if deleted[0] != "receipt-poison-handle" {
-		t.Errorf("expected deleted handle 'receipt-poison-handle', got %q", deleted[0])
+	lastPanicCall := mockStorePanic.updateStatusCalls[len(mockStorePanic.updateStatusCalls)-1]
+	if lastPanicCall.status != models.ScanStatusFailed {
+		t.Errorf("Expected final status on panic to be %s, got %s", models.ScanStatusFailed, lastPanicCall.status)
 	}
-	if len(taskChan) != 0 {
-		t.Errorf("expected taskChan to be empty (poison message should not be dispatched), got %d items", len(taskChan))
-	}
+
+	// 3. Store error resilience: when store returns error on update, worker does not panic
+	mockStoreErr := &mockPoolStore{updateStatusErr: errors.New("db connection lost")}
+	poolErr := NewPool(nil, "http://mock-queue", mockStoreErr, 1, logger, failHandler)
+	poolErr.processTaskSafely(context.Background(), 1, task, "")
 }

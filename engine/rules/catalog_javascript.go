@@ -11,6 +11,7 @@ var jsEntries = []CatalogEntry{
 	{Name: "exec", Category: CategorySink, SinkKind: SinkCommand, Language: "javascript"},
 	{Name: "execSync", Category: CategorySink, SinkKind: SinkCommand, Language: "javascript"},
 	{Name: "fs.readFile", Category: CategorySink, SinkKind: SinkFile, Language: "javascript"},
+	{Name: "fs.readFileSync", Category: CategorySink, SinkKind: SinkFile, Language: "javascript"},
 	{Name: "fs.writeFile", Category: CategorySink, SinkKind: SinkFile, Language: "javascript"},
 	{Name: "escape", Category: CategorySanitizer, Language: "javascript"},
 	{Name: "sanitize", Category: CategorySanitizer, Language: "javascript"},
