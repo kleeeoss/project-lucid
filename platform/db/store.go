@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -10,6 +11,13 @@ import (
 
 	"lucid-ci/platform/models"
 )
+
+var uuidRegex = regexp.MustCompile(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32})$`)
+
+// IsValidUUID validates that the given string matches the standard UUID format (36-char hyphenated or 32-char hex).
+func IsValidUUID(u string) bool {
+	return uuidRegex.MatchString(u)
+}
 
 // Store defines all persistence operations required by the Platform worker and API.
 type Store interface {
@@ -132,6 +140,10 @@ func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error
 }
 
 func (s *pgStore) UpdateScanRunStatus(ctx context.Context, scanID string, status models.ScanStatus, findingsCount int, durationMs *int) error {
+	if !IsValidUUID(scanID) {
+		return fmt.Errorf("UpdateScanRunStatus: invalid scan ID: %s", scanID)
+	}
+
 	query := `
 		UPDATE scan_runs
 		SET status = $1::scan_status,
@@ -145,12 +157,16 @@ func (s *pgStore) UpdateScanRunStatus(ctx context.Context, scanID string, status
 		return fmt.Errorf("UpdateScanRunStatus: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("UpdateScanRunStatus: scan_run %s not found", scanID)
+		return fmt.Errorf("UpdateScanRunStatus: scan_run not found: %s", scanID)
 	}
 	return nil
 }
 
 func (s *pgStore) UpdateCheckRunID(ctx context.Context, scanID string, checkRunID int64) error {
+	if !IsValidUUID(scanID) {
+		return fmt.Errorf("UpdateCheckRunID: invalid scan ID: %s", scanID)
+	}
+
 	query := `
 		UPDATE scan_runs
 		SET check_run_id = $1
@@ -167,6 +183,10 @@ func (s *pgStore) UpdateCheckRunID(ctx context.Context, scanID string, checkRunI
 }
 
 func (s *pgStore) GetScanRunByID(ctx context.Context, scanID string) (*models.ScanRun, error) {
+	if !IsValidUUID(scanID) {
+		return nil, fmt.Errorf("GetScanRunByID: invalid scan ID: %s", scanID)
+	}
+
 	query := `
 		SELECT id, repository_id, pr_number, commit_sha, status, check_run_id,
 		       findings_count, scan_duration_ms, started_at, completed_at
@@ -198,6 +218,9 @@ func (s *pgStore) GetScanRunByID(ctx context.Context, scanID string) (*models.Sc
 func (s *pgStore) InsertVulnerabilities(ctx context.Context, scanID string, vulns []models.Vulnerability) error {
 	if len(vulns) == 0 {
 		return nil
+	}
+	if !IsValidUUID(scanID) {
+		return fmt.Errorf("InsertVulnerabilities: invalid scan ID: %s", scanID)
 	}
 
 	// Use pgx.CopyFrom for high-throughput batch insert
@@ -254,6 +277,10 @@ func (s *pgStore) InsertVulnerabilities(ctx context.Context, scanID string, vuln
 }
 
 func (s *pgStore) GetVulnerabilitiesByScanRunID(ctx context.Context, scanID string) ([]models.Vulnerability, error) {
+	if !IsValidUUID(scanID) {
+		return nil, fmt.Errorf("GetVulnerabilitiesByScanRunID: invalid scan ID: %s", scanID)
+	}
+
 	query := `
 		SELECT id, scan_run_id, rule_id, cwe, severity, confidence_score,
 		       file_path, line_start, line_end, vulnerable_code,

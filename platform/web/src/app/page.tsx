@@ -1,9 +1,12 @@
+// src/app/page.tsx
 import Link from "next/link";
 import { query } from "@/lib/db";
 import { ScanRun } from "@/lib/types";
 import { MetricCard } from "@/components/MetricCard";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ShieldAlert, CheckCircle2, Cpu, Clock, GitPullRequest, ArrowRight } from "lucide-react";
+import { ShieldAlert, CheckCircle2, GitPullRequest, Clock, ArrowRight, Activity, Search } from "lucide-react";
+
+export const revalidate = 5; // Live auto-polling every 5 seconds
 
 async function getDashboardData() {
   try {
@@ -14,7 +17,7 @@ async function getDashboardData() {
       FROM scan_runs s
       LEFT JOIN repositories r ON r.id = s.repository_id
       ORDER BY s.started_at DESC
-      LIMIT 20;
+      LIMIT 25;
     `);
 
     const statsRes = await query(`
@@ -38,7 +41,7 @@ async function getDashboardData() {
       stats: {
         totalScans: stats.total_scans,
         completedScans: stats.completed_scans,
-        criticalVulns: stats.total_findings,
+        totalFindings: stats.total_findings,
         avgDurationMs: stats.avg_duration,
       },
     };
@@ -46,7 +49,7 @@ async function getDashboardData() {
     console.error("Database query failed:", error);
     return {
       scans: [],
-      stats: { totalScans: 0, completedScans: 0, criticalVulns: 0, avgDurationMs: 0 },
+      stats: { totalScans: 0, completedScans: 0, totalFindings: 0, avgDurationMs: 0 },
     };
   }
 }
@@ -56,12 +59,19 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      {/* Top Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-white">Security Scan Operations</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Live monitoring of Pull Requests, AST taint traces, and Small Language Model patch generation.
-        </p>
+      {/* Top Header with Live Ingestion Indicator */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-5">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">DevSecOps Control Plane</h1>
+          <p className="mt-1 text-xs text-zinc-400">
+            Real-time PR interception, Tree-sitter taint analysis, and gVisor detonation verification.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-950/30 px-3 py-1 text-xs text-sky-400 font-mono">
+          <span className="h-2 w-2 rounded-full bg-sky-400" />
+          <span>PostgreSQL Store Connected</span>
+        </div>
       </div>
 
       {/* KPI Stats Grid */}
@@ -73,67 +83,67 @@ export default async function DashboardPage() {
           icon={<GitPullRequest className="h-5 w-5 text-sky-400" />}
         />
         <MetricCard
-          title="Vulnerabilities Blocked"
-          value={stats.criticalVulns}
-          subtitle="SQLi, Cmd Injection & Secrets"
+          title="Total Vulnerabilities"
+          value={stats.totalFindings}
+          subtitle="Static Analysis Detections"
           icon={<ShieldAlert className="h-5 w-5 text-rose-400" />}
         />
         <MetricCard
-          title="Successful Cycles"
+          title="PR Check Runs Published"
           value={stats.completedScans}
-          subtitle="Check Runs finalized"
+          subtitle="GitHub Annotations & Fix Suggestions"
           icon={<CheckCircle2 className="h-5 w-5 text-emerald-400" />}
         />
         <MetricCard
-          title="Avg Cycle Latency"
+          title="Mean Analysis Latency"
           value={`${(stats.avgDurationMs / 1000).toFixed(1)}s`}
-          subtitle="Target SLA: < 120 seconds"
+          subtitle="Sub-minute CI SLA Budget"
           icon={<Clock className="h-5 w-5 text-amber-400" />}
         />
       </div>
 
       {/* Scans Feed Table */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden backdrop-blur-sm">
-        <div className="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden backdrop-blur-md shadow-xl">
+        <div className="border-b border-zinc-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <Cpu className="h-4 w-4 text-sky-400" />
-            <h2 className="text-sm font-semibold text-white">Recent Pull Request Scans</h2>
+            <Activity className="h-4 w-4 text-sky-400" />
+            <h2 className="text-sm font-semibold text-white">Pull Request Scan Ingestion Stream</h2>
           </div>
-          <span className="text-xs text-slate-400">Auto-refreshing PostgreSQL Store</span>
+          <span className="text-[11px] font-mono text-zinc-500">Live Auto-Refresh Active (5s)</span>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-800 bg-slate-900/90 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <thead className="border-b border-zinc-800 bg-zinc-950/80 text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
               <tr>
-                <th className="px-6 py-3">Repository & PR</th>
-                <th className="px-6 py-3">Commit SHA</th>
-                <th className="px-6 py-3">Status</th>
-                <th className="px-6 py-3">Findings</th>
-                <th className="px-6 py-3">Duration</th>
-                <th className="px-6 py-3">Timestamp</th>
-                <th className="px-6 py-3 text-right">Actions</th>
+                <th className="px-6 py-3.5">Repository & PR</th>
+                <th className="px-6 py-3.5">Commit SHA</th>
+                <th className="px-6 py-3.5">Status</th>
+                <th className="px-6 py-3.5">Vulnerability Count</th>
+                <th className="px-6 py-3.5">Pipeline Latency</th>
+                <th className="px-6 py-3.5">Timestamp</th>
+                <th className="px-6 py-3.5 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 font-mono text-xs">
+            <tbody className="divide-y divide-zinc-800/60 font-mono text-xs">
               {scans.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-sans">
-                    No scan runs found in PostgreSQL. Send a webhook to populate.
+                  <td colSpan={7} className="px-6 py-12 text-center text-zinc-500 font-sans">
+                    No scans recorded in PostgreSQL store yet.
                   </td>
                 </tr>
               ) : (
                 scans.map((scan) => (
-                  <tr key={scan.id} className="hover:bg-slate-800/40 transition">
+                  <tr key={scan.id} className="hover:bg-zinc-800/40 transition">
                     <td className="px-6 py-4 font-sans font-medium text-white">
                       <div className="flex items-center gap-2">
-                        <span className="text-slate-300">{scan.repo_name || "acme/lucid-ci"}</span>
-                        <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-sky-400">
+                        <span className="text-zinc-200">{scan.repo_name || "acme/lucid-ci"}</span>
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] font-mono text-sky-400 border border-zinc-700">
                           #{scan.pr_number}
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-slate-400">
+                    <td className="px-6 py-4 text-zinc-400">
                       {scan.commit_sha.substring(0, 8)}
                     </td>
                     <td className="px-6 py-4 font-sans">
@@ -141,26 +151,26 @@ export default async function DashboardPage() {
                     </td>
                     <td className="px-6 py-4 font-sans">
                       {scan.findings_count > 0 ? (
-                        <span className="inline-flex items-center gap-1 font-semibold text-rose-400">
+                        <span className="inline-flex items-center gap-1.5 font-bold text-rose-400">
                           <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
-                          {scan.findings_count} Finding
+                          {scan.findings_count} {scan.findings_count === 1 ? "Finding" : "Findings"}
                         </span>
                       ) : (
-                        <span className="text-slate-400">Clean</span>
+                        <span className="text-emerald-400 font-medium">Clean</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-slate-400">
-                      {scan.scan_duration_ms ? `${(scan.scan_duration_ms / 1000).toFixed(1)}s` : "-"}
+                    <td className="px-6 py-4 text-zinc-400">
+                      {scan.scan_duration_ms ? `${(scan.scan_duration_ms / 1000).toFixed(2)}s` : "-"}
                     </td>
-                    <td className="px-6 py-4 text-slate-500 font-sans">
+                    <td className="px-6 py-4 text-zinc-500 font-sans">
                       {new Date(scan.started_at).toLocaleTimeString()}
                     </td>
                     <td className="px-6 py-4 text-right font-sans">
                       <Link
                         href={`/scans/${scan.id}`}
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700 hover:text-white transition"
+                        className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700 hover:text-white transition"
                       >
-                        Inspect
+                        Inspect Workbench
                         <ArrowRight className="h-3 w-3" />
                       </Link>
                     </td>
