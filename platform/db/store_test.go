@@ -156,6 +156,19 @@ func TestStore_ScanRunLifecycle(t *testing.T) {
 	if scan.ScanDurationMs != nil {
 		t.Errorf("Expected scan_duration_ms to be reset to nil on transition to SCANNING, got %v", scan.ScanDurationMs)
 	}
+
+	// 7. Verify CreateScanRun idempotency on duplicate / retry SQS task
+	scanRunRetry := &models.ScanRun{
+		ID:            taskID,
+		RepositoryID:  repo.ID,
+		PRNumber:      77,
+		CommitSHA:     "a1b2c3d4",
+		Status:        models.ScanStatusScanning,
+		FindingsCount: 0,
+	}
+	if err := store.CreateScanRun(ctx, scanRunRetry); err != nil {
+		t.Fatalf("CreateScanRun retry failed (idempotency broken): %v", err)
+	}
 }
 
 func TestStore_ScanRunFailureLifecycle(t *testing.T) {
@@ -364,5 +377,68 @@ func TestStore_InsertAndGetVulnerabilities(t *testing.T) {
 	}
 	if fetched[1].RuleID != "LUCID-SEC-002" || fetched[1].SandboxVerified != true {
 		t.Errorf("Unexpected vuln 1: %+v", fetched[1])
+	}
+}
+
+func TestIsValidUUID(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "valid 36-char hyphenated UUID lowercase",
+			input:    "e3a0cadd-cfc7-445b-955a-09cb466d3c1e",
+			expected: true,
+		},
+		{
+			name:     "valid 36-char hyphenated UUID uppercase",
+			input:    "E3A0CADD-CFC7-445B-955A-09CB466D3C1E",
+			expected: true,
+		},
+		{
+			name:     "valid 32-char unhyphenated hex string CTR-002",
+			input:    "96b01061d1f61bf06baaf26eab2634f5",
+			expected: true,
+		},
+		{
+			name:     "valid 32-char unhyphenated hex string uppercase",
+			input:    "96B01061D1F61BF06BAAF26EAB2634F5",
+			expected: true,
+		},
+		{
+			name:     "invalid non-hex characters",
+			input:    "96b01061d1f61bf06baaf26eab2634zz",
+			expected: false,
+		},
+		{
+			name:     "invalid too short",
+			input:    "96b01061d1f61bf0",
+			expected: false,
+		},
+		{
+			name:     "invalid too long",
+			input:    "96b01061d1f61bf06baaf26eab2634f5aa",
+			expected: false,
+		},
+		{
+			name:     "invalid empty string",
+			input:    "",
+			expected: false,
+		},
+		{
+			name:     "invalid arbitrary text",
+			input:    "not-a-valid-uuid-at-all",
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := IsValidUUID(tc.input)
+			if actual != tc.expected {
+				t.Errorf("IsValidUUID(%q) = %v; want %v", tc.input, actual, tc.expected)
+			}
+		})
 	}
 }

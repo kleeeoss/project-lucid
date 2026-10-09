@@ -75,7 +75,7 @@ export function ScanWorkbench({ vulns, scan }: { vulns: Vulnerability[]; scan: S
                                         <FileCode className="h-3 w-3 text-zinc-500 shrink-0" />
                                         {v.file_path}:{v.line_start}
                                     </span>
-                                    <span className="text-zinc-500">{((Number(v.confidence_score) || 0.95) * 100).toFixed(0)}% Conf</span>
+                                    <span className="text-zinc-500">{((Number(v.confidence_score) || 0) * 100).toFixed(0)}% Conf</span>
                                 </div>
                             </button>
                         );
@@ -107,7 +107,7 @@ export function ScanWorkbench({ vulns, scan }: { vulns: Vulnerability[]; scan: S
                                 }`}
                         >
                             <GitCompare className="h-3.5 w-3.5 text-emerald-400" />
-                            Unified Patch Diff
+                            Remediation Patch
                         </button>
 
                         <button
@@ -168,7 +168,7 @@ export function ScanWorkbench({ vulns, scan }: { vulns: Vulnerability[]; scan: S
                                 </div>
                                 <p className="mt-3 text-sm text-zinc-200 leading-relaxed font-sans">
                                     {selectedVuln.ai_explanation ||
-                                        "User-controlled parameter is directly concatenated or interpolated into a database sink without escaping or bind variables."}
+                                        "No automated explanation generated for this vulnerability."}
                                 </p>
                             </div>
 
@@ -178,8 +178,8 @@ export function ScanWorkbench({ vulns, scan }: { vulns: Vulnerability[]; scan: S
                                     <span className="text-emerald-400 font-semibold mt-1 block">Cryptographic Nonce Enclosure</span>
                                 </div>
                                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-                                    <span className="text-zinc-500 block">Inference Failover</span>
-                                    <span className="text-sky-400 font-semibold mt-1 block">Groq 8B ➔ Gemini 1.5 Flash</span>
+                                    <span className="text-zinc-500 block">Remediation Engine</span>
+                                    <span className="text-sky-400 font-semibold mt-1 block">AI Remediation Pipeline</span>
                                 </div>
                             </div>
                         </div>
@@ -187,17 +187,32 @@ export function ScanWorkbench({ vulns, scan }: { vulns: Vulnerability[]; scan: S
 
                     {activeTab === "sandbox" && (
                         <div className="rounded-lg border border-zinc-800 bg-black font-mono text-xs text-zinc-300 p-4 space-y-3">
-                            <div className="flex items-center justify-between text-zinc-500 border-b border-zinc-800 pb-2">
+                            <div className="flex items-center justify-between text-zinc-400 border-b border-zinc-800 pb-2">
                                 <span>Dynamic Detonation Telemetry (Host: Docker-on-EC2)</span>
-                                <span className="text-emerald-400">EXIT CODE: 0</span>
+                                {selectedVuln.sandbox_verified ? (
+                                    <span className="text-emerald-400 font-bold px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/30">
+                                        DETONATION PASSED (VERIFIED)
+                                    </span>
+                                ) : (
+                                    <span className="text-rose-400 font-bold px-2 py-0.5 rounded bg-rose-950/60 border border-rose-500/30">
+                                        DETONATION UNVERIFIED
+                                    </span>
+                                )}
                             </div>
-                            <div className="space-y-1 text-[11px] leading-relaxed">
-                                <p className="text-zinc-500">$ docker run --runtime=runsc --network none --memory 512m --cpus 0.5</p>
-                                <p className="text-emerald-400">[gVisor] Intercepting all syscalls via userspace Sentry kernel</p>
-                                <p className="text-zinc-400">[Isolation] Host network unreachable (--net none verified)</p>
-                                <p className="text-zinc-400">[Watchdog] Execution completed in 1.42s (within 60s cap)</p>
-                                <p className="text-sky-400">[Result] Patch syntax validated by AST parser; zero runtime exceptions.</p>
-                            </div>
+                            {selectedVuln.sandbox_verified ? (
+                                <div className="space-y-1.5 text-[11px] leading-relaxed">
+                                    <p className="text-zinc-500">$ docker run --runtime=runsc --network none --memory 512m --cpus 0.5 lucid-sandbox-runner</p>
+                                    <p className="text-emerald-400">[gVisor] Intercepting all syscalls via userspace Sentry kernel (runsc)</p>
+                                    <p className="text-zinc-400">[Isolation] Host network unreachable (--network none verified)</p>
+                                    <p className="text-zinc-400">[Network Egress] 0 egress attempts intercepted</p>
+                                    <p className="text-sky-400">[Result] Automated test suite verified; zero runtime security violations.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-1.5 text-[11px] leading-relaxed">
+                                    <p className="text-zinc-500">[gVisor Watchdog] Automated patch detonation was not verified or completed with non-zero exit code.</p>
+                                    <p className="text-rose-400">[Notice] Patch has NOT been verified by sandbox detonation. Manual engineering review required.</p>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

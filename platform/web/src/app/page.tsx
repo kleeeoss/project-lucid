@@ -41,7 +41,7 @@ async function getDashboardData() {
       stats: {
         totalScans: stats.total_scans,
         completedScans: stats.completed_scans,
-        criticalVulns: stats.total_findings,
+        totalFindings: stats.total_findings,
         avgDurationMs: stats.avg_duration,
       },
     };
@@ -49,7 +49,7 @@ async function getDashboardData() {
     console.error("Database query failed:", error);
     return {
       scans: [],
-      stats: { totalScans: 0, completedScans: 0, criticalVulns: 0, avgDurationMs: 0 },
+      stats: { totalScans: 0, completedScans: 0, totalFindings: 0, avgDurationMs: 0 },
     };
   }
 }
@@ -68,9 +68,9 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-950/30 px-3 py-1 text-xs text-emerald-400 font-mono">
-          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-          <span>Pipeline Nominal • SQS Polling Active</span>
+        <div className="flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-950/30 px-3 py-1 text-xs text-sky-400 font-mono">
+          <span className="h-2 w-2 rounded-full bg-sky-400" />
+          <span>PostgreSQL Store Connected</span>
         </div>
       </div>
 
@@ -83,15 +83,15 @@ export default async function DashboardPage() {
           icon={<GitPullRequest className="h-5 w-5 text-sky-400" />}
         />
         <MetricCard
-          title="Vulnerabilities Intercepted"
-          value={stats.criticalVulns}
-          subtitle="SQLi, Cmd Injection & Secrets"
+          title="Total Vulnerabilities"
+          value={stats.totalFindings}
+          subtitle="Static Analysis Detections"
           icon={<ShieldAlert className="h-5 w-5 text-rose-400" />}
         />
         <MetricCard
           title="PR Check Runs Published"
           value={stats.completedScans}
-          subtitle="Annotations & 1-Click Suggestions"
+          subtitle="GitHub Annotations & Fix Suggestions"
           icon={<CheckCircle2 className="h-5 w-5 text-emerald-400" />}
         />
         <MetricCard
@@ -153,7 +153,7 @@ export default async function DashboardPage() {
                       {scan.findings_count > 0 ? (
                         <span className="inline-flex items-center gap-1.5 font-bold text-rose-400">
                           <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
-                          {scan.findings_count} Critical
+                          {scan.findings_count} {scan.findings_count === 1 ? "Finding" : "Findings"}
                         </span>
                       ) : (
                         <span className="text-emerald-400 font-medium">Clean</span>
