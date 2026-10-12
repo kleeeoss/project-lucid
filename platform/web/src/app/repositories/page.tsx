@@ -43,14 +43,6 @@ function timeAgo(date: string | null) {
 export default async function RepositoriesPage() {
     const repos = await getRepositories();
 
-    const demoRepos = repos.length > 0 ? repos : [
-        { id: 1, full_name: "lucid-engine", default_branch: "main", scan_count: 48, total_findings: 3, last_scan_at: new Date(Date.now() - 3600000).toISOString(), installation_id: 1 },
-        { id: 2, full_name: "lucid-platform", default_branch: "main", scan_count: 32, total_findings: 7, last_scan_at: new Date(Date.now() - 7200000).toISOString(), installation_id: 1 },
-        { id: 3, full_name: "lucid-infra", default_branch: "main", scan_count: 15, total_findings: 0, last_scan_at: new Date(Date.now() - 86400000).toISOString(), installation_id: 1 },
-        { id: 4, full_name: "lucid-frontend", default_branch: "main", scan_count: 22, total_findings: 0, last_scan_at: new Date(Date.now() - 172800000).toISOString(), installation_id: 1 },
-        { id: 5, full_name: "lucid-docs", default_branch: "main", scan_count: 5, total_findings: 0, last_scan_at: new Date(Date.now() - 259200000).toISOString(), installation_id: 1 },
-    ];
-
     return (
         <div className="space-y-6">
             <div className="flex items-start justify-between gap-4">
@@ -79,58 +71,68 @@ export default async function RepositoriesPage() {
             </div>
 
             {/* Repository list */}
-            <div className="space-y-3">
-                {demoRepos.map((repo: any) => {
-                    const healthPct = Math.max(0, 100 - repo.total_findings * 10);
-                    const healthColor = healthPct >= 90 ? "text-secondary" : healthPct >= 50 ? "text-warning" : "text-error";
-                    const barColor = healthPct >= 90 ? "bg-secondary" : healthPct >= 50 ? "bg-warning" : "bg-error";
+            {repos.length === 0 ? (
+                <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low p-12 text-center">
+                    <GitFork className="h-10 w-10 text-on-surface-variant/40 mx-auto mb-3" />
+                    <h3 className="text-body-lg font-semibold text-on-surface">No repositories connected yet</h3>
+                    <p className="mt-1 text-body-sm text-on-surface-variant/70 max-w-sm mx-auto">
+                        Connect your GitHub repositories to enable automated pull request scanning and AST security checks.
+                    </p>
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    {repos.map((repo: any) => {
+                        const healthPct = Math.max(0, 100 - repo.total_findings * 10);
+                        const healthColor = healthPct >= 90 ? "text-secondary" : healthPct >= 50 ? "text-warning" : "text-error";
+                        const barColor = healthPct >= 90 ? "bg-secondary" : healthPct >= 50 ? "bg-warning" : "bg-error";
 
-                    return (
-                        <div key={repo.id} className="rounded-lg border border-outline-variant/30 bg-surface-container-low p-4 hover:bg-surface-container transition">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="h-10 w-10 rounded-lg bg-surface-container flex items-center justify-center">
-                                        <GitFork className="h-5 w-5 text-primary" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-body-lg font-semibold text-on-surface">{repo.full_name}</h3>
-                                        <div className="flex items-center gap-3 mt-0.5 text-label-sm text-on-surface-variant">
-                                            <span className="font-mono">{repo.default_branch}</span>
-                                            <span>•</span>
-                                            <span>{repo.scan_count} scans</span>
-                                            <span>•</span>
-                                            <span className="flex items-center gap-1">
-                                                <Clock className="h-3 w-3" />
-                                                {timeAgo(repo.last_scan_at)}
-                                            </span>
+                        return (
+                            <div key={repo.id} className="rounded-lg border border-outline-variant/30 bg-surface-container-low p-4 hover:bg-surface-container transition">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-10 w-10 rounded-lg bg-surface-container flex items-center justify-center">
+                                            <GitFork className="h-5 w-5 text-primary" />
                                         </div>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                    <div className="text-right">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-20 h-1.5 rounded-full bg-surface-container overflow-hidden">
-                                                <div className={`h-full rounded-full ${barColor}`} style={{ width: `${healthPct}%` }} />
+                                        <div>
+                                            <h3 className="text-body-lg font-semibold text-on-surface">{repo.full_name}</h3>
+                                            <div className="flex items-center gap-3 mt-0.5 text-label-sm text-on-surface-variant">
+                                                <span className="font-mono">{repo.default_branch}</span>
+                                                <span>•</span>
+                                                <span>{repo.scan_count} scans</span>
+                                                <span>•</span>
+                                                <span className="flex items-center gap-1">
+                                                    <Clock className="h-3 w-3" />
+                                                    {timeAgo(repo.last_scan_at)}
+                                                </span>
                                             </div>
-                                            <span className={`text-label-sm font-medium ${healthColor}`}>{healthPct}%</span>
                                         </div>
-                                        <p className="text-label-sm text-on-surface-variant/60 mt-0.5">
-                                            {repo.total_findings > 0 ? (
-                                                <span className="text-error">{repo.total_findings} findings</span>
-                                            ) : (
-                                                <span className="text-secondary">Clean</span>
-                                            )}
-                                        </p>
                                     </div>
-                                    <Link href={`/scans`} className="rounded-md border border-outline-variant/30 bg-surface-container p-2 hover:bg-surface-container-high transition">
-                                        <ArrowRight className="h-4 w-4 text-on-surface-variant" />
-                                    </Link>
+                                    <div className="flex items-center gap-4">
+                                        <div className="text-right">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-20 h-1.5 rounded-full bg-surface-container overflow-hidden">
+                                                    <div className={`h-full rounded-full ${barColor}`} style={{ width: `${healthPct}%` }} />
+                                                </div>
+                                                <span className={`text-label-sm font-medium ${healthColor}`}>{healthPct}%</span>
+                                            </div>
+                                            <p className="text-label-sm text-on-surface-variant/60 mt-0.5">
+                                                {repo.total_findings > 0 ? (
+                                                    <span className="text-error">{repo.total_findings} findings</span>
+                                                ) : (
+                                                    <span className="text-secondary">Clean</span>
+                                                )}
+                                            </p>
+                                        </div>
+                                        <Link href={`/scans`} className="rounded-md border border-outline-variant/30 bg-surface-container p-2 hover:bg-surface-container-high transition">
+                                            <ArrowRight className="h-4 w-4 text-on-surface-variant" />
+                                        </Link>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    );
-                })}
-            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }

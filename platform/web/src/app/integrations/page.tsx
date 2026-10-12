@@ -22,14 +22,14 @@ export default function IntegrationsPage() {
             description: "Async scan job queue for worker pool ingestion pipeline",
             icon: Cloud,
             status: "connected",
-            detail: "us-east-1 • lucid-scan-queue • Polling active",
+            detail: "ap-southeast-2 • lucid-scan-queue • Polling active",
         },
         {
             name: "Webhook Endpoint",
             description: "Inbound GitHub webhook receiver for PR & push events",
             icon: Webhook,
-            status: "warning",
-            detail: "HMAC validation pending configuration",
+            status: "connected",
+            detail: "SHA-256 HMAC Signature Verification Active",
         },
     ];
 
