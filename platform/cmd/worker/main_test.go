@@ -349,8 +349,8 @@ func TestPipelineHandler_RealStore_Integration(t *testing.T) {
 	if scan.Status != models.ScanStatusCompleted {
 		t.Errorf("Expected final status %s, got %s", models.ScanStatusCompleted, scan.Status)
 	}
-	if scan.FindingsCount != 3 {
-		t.Errorf("Expected findings_count 3, got %d", scan.FindingsCount)
+	if scan.FindingsCount != 4 {
+		t.Errorf("Expected findings_count 4, got %d", scan.FindingsCount)
 	}
 	if scan.CompletedAt == nil {
 		t.Errorf("Expected completed_at to be populated")
@@ -364,8 +364,8 @@ func TestPipelineHandler_RealStore_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetVulnerabilitiesByScanRunID failed: %v", err)
 	}
-	if len(vulns) != 3 {
-		t.Fatalf("Expected 3 vulnerabilities, got %d", len(vulns))
+	if len(vulns) != 4 {
+		t.Fatalf("Expected 4 vulnerabilities, got %d", len(vulns))
 	}
 	for i, v := range vulns {
 		if v.SandboxVerified {
