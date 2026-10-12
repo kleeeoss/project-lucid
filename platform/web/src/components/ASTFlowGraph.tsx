@@ -15,7 +15,7 @@ import {
     ReactFlowProvider,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { AlertCircle, ArrowRight, Sparkles, CheckCircle2 } from "lucide-react";
+import { AlertCircle, ArrowRight, Sparkles, CheckCircle2, Network } from "lucide-react";
 import { Vulnerability } from "@/lib/types";
 
 interface NodeData {
@@ -135,66 +135,8 @@ function FlowCanvas({ vuln }: { vuln: Vulnerability }) {
             return { nodes: autoNodes, edges: autoEdges };
         }
 
-        // Default 3-node fallback layout
-        const startLine = vuln.line_start || 42;
-        const fallbackNodes: Node[] = [
-            {
-                id: "source",
-                type: "custom",
-                position: { x: 200, y: 30 },
-                data: {
-                    type: "source",
-                    label: "req.params.id (HTTP Input)",
-                    line: startLine,
-                    codeSnippet: "const userId = req.params.id;",
-                },
-            },
-            {
-                id: "propagator",
-                type: "custom",
-                position: { x: 200, y: 170 },
-                data: {
-                    type: "propagator",
-                    label: "Template Literal String Interpolation",
-                    line: startLine + 1,
-                    codeSnippet: "query = `SELECT * FROM users WHERE id = '${userId}'`",
-                },
-            },
-            {
-                id: "sink",
-                type: "custom",
-                position: { x: 200, y: 310 },
-                data: {
-                    type: "sink",
-                    label: "db.query() (Raw SQL Execution Sink)",
-                    line: startLine + 2,
-                    codeSnippet: "await db.query(query);",
-                },
-            },
-        ];
-
-        const fallbackEdges: Edge[] = [
-            {
-                id: "e1",
-                source: "source",
-                target: "propagator",
-                animated: true,
-                style: { stroke: "#f59e0b", strokeWidth: 2 },
-                label: "taint propagated",
-                labelStyle: { fill: "#f59e0b", fontSize: 10, fontFamily: "monospace" },
-            },
-            {
-                id: "e2",
-                source: "propagator",
-                target: "sink",
-                animated: true,
-                style: { stroke: "#f43f5e", strokeWidth: 2.5 },
-                label: "untrusted execution",
-                labelStyle: { fill: "#f43f5e", fontSize: 10, fontFamily: "monospace" },
-            },
-        ];
-
-        return { nodes: fallbackNodes, edges: fallbackEdges };
+        // Truthful empty layout when no structured AST graph exists
+        return { nodes: [], edges: [] };
     }, [vuln]);
 
     // Stepper Controller: Focus camera on node step
@@ -207,6 +149,18 @@ function FlowCanvas({ vuln }: { vuln: Vulnerability }) {
             duration: 600,
         });
     };
+
+    if (nodes.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center h-[420px] w-full rounded-xl border border-zinc-800 bg-[#090b10] p-6 text-center">
+                <Network className="h-8 w-8 text-zinc-600 mb-2" />
+                <p className="text-sm font-semibold text-zinc-300">AST Taint Trace Unavailable</p>
+                <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+                    Static engine identified this finding via pattern analysis; no structured AST taint dataflow graph was recorded for this rule.
+                </p>
+            </div>
+        );
+    }
 
     return (
         <div className="relative h-[480px] w-full rounded-xl border border-zinc-800 bg-[#090b10] overflow-hidden">

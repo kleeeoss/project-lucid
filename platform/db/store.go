@@ -12,9 +12,9 @@ import (
 	"lucid-ci/platform/models"
 )
 
-var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var uuidRegex = regexp.MustCompile(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32})$`)
 
-// IsValidUUID validates that the given string matches the standard UUID format.
+// IsValidUUID validates that the given string matches the standard UUID format (36-char hyphenated or 32-char hex).
 func IsValidUUID(u string) bool {
 	return uuidRegex.MatchString(u)
 }
@@ -113,9 +113,16 @@ func (s *pgStore) GetRepositoryByID(ctx context.Context, id int64) (*models.Repo
 }
 
 func (s *pgStore) CreateScanRun(ctx context.Context, scan *models.ScanRun) error {
+	// Support deterministic caller-provided scan UUID (e.g. task.TaskID) or generate fresh UUID
 	query := `
 		INSERT INTO scan_runs (id, repository_id, pr_number, commit_sha, status, findings_count, started_at)
-		VALUES (COALESCE(NULLIF($6, '')::uuid, gen_random_uuid()), $1, $2, $3, $4::scan_status, $5, NOW())
+		VALUES (COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()), $2, $3, $4, $5::scan_status, $6, NOW())
+		ON CONFLICT (id) DO UPDATE
+		SET status = EXCLUDED.status,
+		    findings_count = EXCLUDED.findings_count,
+		    completed_at = NULL,
+		    scan_duration_ms = NULL,
+		    started_at = NOW()
 		RETURNING id, started_at;
 	`
 	err := s.pool.QueryRow(ctx, query,

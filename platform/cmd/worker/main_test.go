@@ -148,12 +148,19 @@ func TestPipelineHandler_SandboxFailure_CompletesWithUnverifiedVulns(t *testing.
 		t.Fatalf("Expected 1 InsertVulnerabilities call, got %d", len(store.insertVulnsCalls))
 	}
 	vulns := store.insertVulnsCalls[0].vulns
-	if len(vulns) != 3 {
-		t.Fatalf("Expected 3 persisted vulnerabilities, got %d", len(vulns))
+	if len(vulns) != 4 {
+		t.Fatalf("Expected 4 persisted vulnerabilities, got %d", len(vulns))
 	}
+	ruleSet := make(map[string]bool)
 	for i, v := range vulns {
+		ruleSet[v.RuleID] = true
 		if v.SandboxVerified {
-			t.Errorf("Vuln %d: expected SandboxVerified = false when sandbox returns exit code 254", i)
+			t.Errorf("Vuln %d (%s): expected SandboxVerified = false when sandbox returns exit code 254", i, v.RuleID)
+		}
+	}
+	for _, expectedRule := range []string{"LUCID-SEC-001", "LUCID-SEC-002", "LUCID-SEC-003", "LUCID-SEC-004"} {
+		if !ruleSet[expectedRule] {
+			t.Errorf("Expected rule %s in persisted findings, but was missing", expectedRule)
 		}
 	}
 
@@ -165,8 +172,8 @@ func TestPipelineHandler_SandboxFailure_CompletesWithUnverifiedVulns(t *testing.
 	if finalCall.status != models.ScanStatusCompleted {
 		t.Errorf("Expected final status %s, got %s", models.ScanStatusCompleted, finalCall.status)
 	}
-	if finalCall.findingsCount != 3 {
-		t.Errorf("Expected final findings_count 3, got %d", finalCall.findingsCount)
+	if finalCall.findingsCount != 4 {
+		t.Errorf("Expected final findings_count 4, got %d", finalCall.findingsCount)
 	}
 	if finalCall.durationMs == nil || *finalCall.durationMs < 0 {
 		t.Errorf("Expected durationMs to be recorded, got %v", finalCall.durationMs)
@@ -204,6 +211,9 @@ func TestPipelineHandler_SandboxPassed_CompletesWithVerifiedVulns(t *testing.T) 
 	}
 
 	vulns := store.insertVulnsCalls[0].vulns
+	if len(vulns) != 4 {
+		t.Fatalf("Expected 4 persisted vulnerabilities, got %d", len(vulns))
+	}
 	for i, v := range vulns {
 		if !v.SandboxVerified {
 			t.Errorf("Vuln %d: expected SandboxVerified = true when sandbox passes", i)
@@ -211,8 +221,8 @@ func TestPipelineHandler_SandboxPassed_CompletesWithVerifiedVulns(t *testing.T) 
 	}
 
 	finalCall := store.updateStatusCalls[len(store.updateStatusCalls)-1]
-	if finalCall.status != models.ScanStatusCompleted || finalCall.findingsCount != 3 {
-		t.Errorf("Expected COMPLETED with 3 findings, got status=%s findings=%d", finalCall.status, finalCall.findingsCount)
+	if finalCall.status != models.ScanStatusCompleted || finalCall.findingsCount != 4 {
+		t.Errorf("Expected COMPLETED with 4 findings, got status=%s findings=%d", finalCall.status, finalCall.findingsCount)
 	}
 }
 
@@ -238,8 +248,8 @@ func TestPipelineHandler_AIFailure_FailOpen(t *testing.T) {
 	}
 
 	finalCall := store.updateStatusCalls[len(store.updateStatusCalls)-1]
-	if finalCall.status != models.ScanStatusCompleted || finalCall.findingsCount != 3 {
-		t.Errorf("Expected COMPLETED with 3 findings, got status=%s findings=%d", finalCall.status, finalCall.findingsCount)
+	if finalCall.status != models.ScanStatusCompleted || finalCall.findingsCount != 4 {
+		t.Errorf("Expected COMPLETED with 4 findings, got status=%s findings=%d", finalCall.status, finalCall.findingsCount)
 	}
 }
 
