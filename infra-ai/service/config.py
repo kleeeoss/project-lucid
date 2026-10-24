@@ -29,8 +29,14 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-20b"
 
+    # Google Cloud Vertex AI Configuration
+    GOOGLE_CLOUD_PROJECT: str = ""
+    GOOGLE_CLOUD_LOCATION: str = "global"
+    VERTEX_AI_MODEL: str = "gemini-3.5-flash-lite"
+
+    # Backwards-compatibility aliases
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
 
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3:8b"
@@ -38,6 +44,7 @@ class Settings(BaseSettings):
     # Sandbox Configuration
     SANDBOX_IMAGE_TAG: str = "lucid-sandbox-runner:latest"
     SANDBOX_RUNTIME: str = "runsc"  # gVisor runtime (runsc) or runc fallback
+    SANDBOX_ALLOW_RUNTIME_FALLBACK: bool = True  # Strict mode in production (False fails fast if runsc missing)
     SANDBOX_MEMORY_LIMIT: str = "512m"
     SANDBOX_CPU_LIMIT: float = 1.0
     SANDBOX_PID_LIMIT: int = 100

@@ -51,6 +51,9 @@ func NewSQSProducer(ctx context.Context, queueURL string, logger *slog.Logger) (
 	if endpointURL == "" {
 		endpointURL = os.Getenv("AWS_ENDPOINT_URL")
 	}
+	if endpointURL == "" {
+		endpointURL = os.Getenv("SQS_ENDPOINT_URL")
+	}
 
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
 	if err != nil {

@@ -28,6 +28,13 @@ pytestmark = pytest.mark.skipif(not is_docker_available(), reason="Docker daemon
 orchestrator = SandboxOrchestrator()
 
 
+@pytest.fixture(autouse=True)
+def isolated_sandbox_temp_dir(tmp_path, monkeypatch):
+    """Ensure test uses a test-scoped temporary directory owned by the test runner."""
+    monkeypatch.setattr(settings, "SANDBOX_BASE_TEMP_DIR", str(tmp_path))
+    yield tmp_path
+
+
 
 @pytest.mark.asyncio
 async def test_orchestrator_executes_passing_code():

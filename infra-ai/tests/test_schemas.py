@@ -86,10 +86,25 @@ class TestSandboxResultCTR007:
         res = create_mock_sandbox_result()
         assert res.status == "PASSED"
         assert res.exit_code == 0
+        assert res.runtime is None
+
+    def test_valid_sandbox_result_with_runtime(self):
+        res = create_mock_sandbox_result()
+        data = res.model_dump()
+        data["runtime"] = "runsc"
+        validated = SandboxResult.model_validate(data)
+        assert validated.runtime == "runsc"
 
     def test_invalid_status_rejected(self):
         res = create_mock_sandbox_result()
         data = res.model_dump()
         data["status"] = "UNKNOWN_STATUS"
+        with pytest.raises(ValidationError):
+            SandboxResult.model_validate(data)
+
+    def test_extra_fields_forbidden(self):
+        res = create_mock_sandbox_result()
+        data = res.model_dump()
+        data["unexpected_extra_field"] = "not_allowed"
         with pytest.raises(ValidationError):
             SandboxResult.model_validate(data)

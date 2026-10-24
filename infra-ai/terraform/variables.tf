@@ -33,3 +33,9 @@ variable "domain" {
   default     = ""
   description = "Optional FQDN for Showcase (e.g. lucid-demo.duckdns.org). If empty, serves plain HTTP on Elastic IP"
 }
+
+variable "git_revision" {
+  type        = string
+  default     = "main"
+  description = "Target Git branch, tag, or commit SHA to deploy (defaults to main)"
+}

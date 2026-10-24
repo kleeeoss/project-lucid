@@ -41,20 +41,21 @@ class TestSandboxRunnerSecurity:
         if not self.client:
             pytest.skip("Docker daemon unreachable")
 
+    def _run_and_capture(self, command: list[str]) -> str:
+        c = self.client.containers.create(IMAGE_TAG, command=command)
+        try:
+            c.start()
+            c.wait()
+            return c.logs().decode().strip()
+        finally:
+            c.remove(force=True)
+
     def test_container_runs_as_unprivileged_user(self):
         """Verify the container default user is sandboxuser with UID 10001."""
-        output = self.client.containers.run(
-            IMAGE_TAG,
-            command=["whoami"],
-            remove=True,
-        ).decode().strip()
+        output = self._run_and_capture(["whoami"])
         assert output == "sandboxuser"
 
-        uid = self.client.containers.run(
-            IMAGE_TAG,
-            command=["id", "-u"],
-            remove=True,
-        ).decode().strip()
+        uid = self._run_and_capture(["id", "-u"])
         assert uid == "10001"
 
     def test_container_cannot_elevate_privileges(self):
@@ -89,9 +90,9 @@ class TestSandboxRunnerSecurity:
 
     def test_node_and_python_runners_available(self):
         """Verify Node.js, Python, Jest, and Pytest are pre-warmed in the image."""
-        node_ver = self.client.containers.run(IMAGE_TAG, command=["node", "-v"], remove=True).decode().strip()
-        py_ver = self.client.containers.run(IMAGE_TAG, command=["python3", "--version"], remove=True).decode().strip()
-        pytest_ver = self.client.containers.run(IMAGE_TAG, command=["pytest", "--version"], remove=True).decode().strip()
+        node_ver = self._run_and_capture(["node", "-v"])
+        py_ver = self._run_and_capture(["python3", "--version"])
+        pytest_ver = self._run_and_capture(["pytest", "--version"])
 
         assert node_ver.startswith("v20.")
         assert "Python 3." in py_ver

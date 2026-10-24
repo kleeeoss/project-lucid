@@ -86,6 +86,8 @@ usermod -aG docker ubuntu
 echo "Setting up persistent host directories..."
 mkdir -p /var/lib/lucid/data/postgres
 mkdir -p /var/lib/lucid/data/caddy
+mkdir -p /var/lib/lucid/config
+chmod 700 /var/lib/lucid/config
 mkdir -p /var/lib/lucid/config/caddy
 mkdir -p /tmp/lucid-sandboxes
 mkdir -p /opt/lucid-ci
@@ -96,14 +98,78 @@ chmod 777 /tmp/lucid-sandboxes
 
 # 4. Clone Repository & Pre-build Sandbox Runner
 echo "Bootstrapping Lucid-CI codebase..."
+
+# Query IMDSv2 token for metadata discovery
+TOKEN=$(curl -s -S -f -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 300" 2>/dev/null || true)
+
+# 4a. Resolve Git Revision (Default to main; pinned commit SHA / branch can be specified via tag or env)
+RAW_REVISION=""
+if [ -n "$TOKEN" ]; then
+    RAW_REVISION=$(curl -s -S -f -H "X-aws-ec2-metadata-token: $TOKEN" \
+      "http://169.254.169.254/latest/meta-data/tags/instance/GitRevision" 2>/dev/null || true)
+fi
+GIT_REVISION="${GIT_REVISION:-${RAW_REVISION:-main}}"
+
 if [ ! -d "/opt/lucid-ci/.git" ]; then
     git clone https://github.com/kleeeoss/project-lucid.git /opt/lucid-ci
+    git -C /opt/lucid-ci checkout "$GIT_REVISION"
 else
-    git -C /opt/lucid-ci pull || true
+    git -C /opt/lucid-ci fetch origin
+    git -C /opt/lucid-ci checkout "$GIT_REVISION"
+    git -C /opt/lucid-ci pull origin "$GIT_REVISION" 2>/dev/null || true
 fi
 
+# 4b. Discover Real AWS SQS Queue URL & AWS Region from IMDSv2
+RAW_SQS_TAG=""
+if [ -n "$TOKEN" ]; then
+    RAW_SQS_TAG=$(curl -s -S -f -H "X-aws-ec2-metadata-token: $TOKEN" \
+      "http://169.254.169.254/latest/meta-data/tags/instance/SqsQueueUrl" 2>/dev/null || true)
+fi
+
+IDENTITY_DOC=""
+if [ -n "$TOKEN" ]; then
+    IDENTITY_DOC=$(curl -s -S -f -H "X-aws-ec2-metadata-token: $TOKEN" \
+      "http://169.254.169.254/latest/dynamic/instance-identity/document" 2>/dev/null || true)
+fi
+
+EC2_REGION=""
+EC2_ACCOUNT_ID=""
+if [ -n "$IDENTITY_DOC" ]; then
+    EC2_REGION=$(echo "$IDENTITY_DOC" | python3 -c 'import sys, json; print(json.load(sys.stdin).get("region", ""))' 2>/dev/null || true)
+    EC2_ACCOUNT_ID=$(echo "$IDENTITY_DOC" | python3 -c 'import sys, json; print(json.load(sys.stdin).get("accountId", ""))' 2>/dev/null || true)
+fi
+EC2_REGION="${EC2_REGION:-ap-southeast-2}"
+
+REAL_SQS_URL="${SQS_QUEUE_URL:-${RAW_SQS_TAG:-}}"
+if [ -z "$REAL_SQS_URL" ] && command -v aws >/dev/null 2>&1; then
+    REAL_SQS_URL=$(aws sqs get-queue-url --queue-name lucid-ci-scans --region "$EC2_REGION" --query 'QueueUrl' --output text 2>/dev/null || true)
+fi
+
+if [ -z "$REAL_SQS_URL" ] || [ "$REAL_SQS_URL" = "None" ]; then
+    if [ -n "$EC2_ACCOUNT_ID" ]; then
+        REAL_SQS_URL="https://sqs.${EC2_REGION}.amazonaws.com/${EC2_ACCOUNT_ID}/lucid-ci-scans"
+    else
+        REAL_SQS_URL="https://sqs.${EC2_REGION}.amazonaws.com/lucid-ci-scans"
+    fi
+fi
+
+# 4c. Configure Environment (.env) with Real AWS SQS URL and Directory Mounts
 if [ -f "/opt/lucid-ci/.env.example" ] && [ ! -f "/opt/lucid-ci/.env" ]; then
     cp /opt/lucid-ci/.env.example /opt/lucid-ci/.env
+fi
+
+if [ -f "/opt/lucid-ci/.env" ]; then
+    # Ensure real AWS SQS queue URL is set instead of LocalStack localhost:4566
+    if grep -q "^SQS_QUEUE_URL=" /opt/lucid-ci/.env; then
+        sed -i "s|^SQS_QUEUE_URL=.*|SQS_QUEUE_URL=${REAL_SQS_URL}|" /opt/lucid-ci/.env
+    else
+        echo "SQS_QUEUE_URL=${REAL_SQS_URL}" >> /opt/lucid-ci/.env
+    fi
+    # Clear localstack endpoint override so AWS SDK targets standard regional endpoints
+    sed -i "s|^SQS_ENDPOINT_URL=.*|SQS_ENDPOINT_URL=|" /opt/lucid-ci/.env
+    sed -i "s|^AWS_REGION=.*|AWS_REGION=${EC2_REGION}|" /opt/lucid-ci/.env
+    sed -i "s|^AWS_DEFAULT_REGION=.*|AWS_DEFAULT_REGION=${EC2_REGION}|" /opt/lucid-ci/.env
 fi
 
 # Pre-build Sandbox Runner image so dynamic execution is immediate

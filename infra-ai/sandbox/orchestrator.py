@@ -55,6 +55,7 @@ class SandboxOrchestrator:
 
         container = None
         start_time = time.perf_counter()
+        actual_runtime = settings.SANDBOX_RUNTIME or "runc"
 
         try:
             # 1. Prepare host workspace
@@ -102,26 +103,23 @@ class SandboxOrchestrator:
 
             def _is_runtime_error(err: Exception) -> bool:
                 err_str = str(err).lower()
+                if "runtime" in err_str and any(term in err_str for term in ("unknown", "invalid", "not found", "not installed", "failed")):
+                    return True
                 return any(term in err_str for term in (
                     "unknown runtime",
                     "invalid runtime",
                     "oci runtime",
                     "runtime start failed",
                     "root network namespace",
+                    "runsc",
                 ))
 
             try:
                 container = client.containers.create(**container_kwargs)
                 container.start()
-            except APIError as runtime_err:
-                # If custom runtime (runsc) fails at create or start, fallback gracefully to runc
+            except (APIError, DockerException) as runtime_err:
+                # If custom runtime (runsc) fails at create or start, check fallback policy
                 if settings.SANDBOX_RUNTIME and _is_runtime_error(runtime_err):
-                    logger.warning(
-                        "sandbox_runtime_unavailable_falling_back",
-                        requested_runtime=settings.SANDBOX_RUNTIME,
-                        fallback="runc",
-                        error=str(runtime_err),
-                    )
                     if container is not None:
                         try:
                             container.remove(force=True)
@@ -129,6 +127,25 @@ class SandboxOrchestrator:
                             pass
                         container = None
 
+                    if not settings.SANDBOX_ALLOW_RUNTIME_FALLBACK:
+                        logger.error(
+                            "sandbox_runtime_unavailable_strict_mode_failed",
+                            requested_runtime=settings.SANDBOX_RUNTIME,
+                            error=str(runtime_err),
+                        )
+                        raise SandboxExecutionError(
+                            f"Strict runtime requirement failed: runtime '{settings.SANDBOX_RUNTIME}' "
+                            f"could not start ({runtime_err})"
+                        ) from runtime_err
+
+                    logger.warning(
+                        "sandbox_runtime_unavailable_falling_back",
+                        requested_runtime=settings.SANDBOX_RUNTIME,
+                        fallback="runc",
+                        error=str(runtime_err),
+                    )
+
+                    actual_runtime = "runc"
                     fallback_kwargs = container_kwargs.copy()
                     fallback_kwargs.pop("runtime", None)
                     container = client.containers.create(**fallback_kwargs)
@@ -176,6 +193,7 @@ class SandboxOrchestrator:
                 stdout=stdout,
                 stderr=stderr,
                 network_egress_attempts=egress_attempts,
+                runtime=actual_runtime,
             )
 
         except Exception as err:
@@ -189,6 +207,7 @@ class SandboxOrchestrator:
                 stdout="",
                 stderr=f"Sandbox Orchestrator Failure: {err}",
                 network_egress_attempts=0,
+                runtime=actual_runtime,
             )
 
         finally:
