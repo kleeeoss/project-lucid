@@ -88,6 +88,7 @@ func TestSandboxClient_Detonate(t *testing.T) {
 			ExitCode:   0,
 			DurationMs: 1200,
 			Stdout:     "tests passed",
+			Runtime:    "runsc",
 		})
 	}))
 	defer mockServer.Close()
@@ -101,7 +102,38 @@ func TestSandboxClient_Detonate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
-	if result.Status != "PASSED" || result.ExitCode != 0 {
+	if result.Status != "PASSED" || result.ExitCode != 0 || result.Runtime != "runsc" {
 		t.Errorf("unexpected sandbox result: %+v", result)
 	}
 }
+
+func TestSandboxClient_DetonateStrictFailure(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(SandboxResult{
+			ScanID:     "scan-sandbox-strict-fail",
+			Status:     "FAILED",
+			ExitCode:   1,
+			DurationMs: 42,
+			Stderr:     "Strict runtime requirement failed: runtime 'runsc' could not start",
+			Runtime:    "runsc",
+		})
+	}))
+	defer mockServer.Close()
+
+	client := NewSandboxClient(mockServer.URL, logger)
+	result, err := client.Detonate(context.Background(), SandboxRequest{
+		ScanID:   "scan-sandbox-strict-fail",
+		Language: "javascript",
+	})
+
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if result.Status != "FAILED" || result.ExitCode != 1 || result.Runtime != "runsc" {
+		t.Errorf("unexpected sandbox result: %+v", result)
+	}
+}
+

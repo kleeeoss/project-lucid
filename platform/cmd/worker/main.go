@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -101,6 +102,9 @@ func main() {
 	endpointURL := os.Getenv("LOCALSTACK_ENDPOINT")
 	if endpointURL == "" {
 		endpointURL = os.Getenv("AWS_ENDPOINT_URL")
+	}
+	if endpointURL == "" {
+		endpointURL = os.Getenv("SQS_ENDPOINT_URL")
 	}
 
 	sqsClient := sqs.NewFromConfig(cfg, func(o *sqs.Options) {
@@ -213,6 +217,159 @@ func getBuildCommandForLanguage(lang string, filePath string) string {
 	default:
 		return fmt.Sprintf("if [ -f package.json ]; then npm test; else node -c %s; fi", filePath)
 	}
+}
+
+var (
+	patchDeclKeywordRE   = regexp.MustCompile(`^\s*(?:export\s+)?(const|let|var)\b`)
+	prefixDeclKeywordRE  = regexp.MustCompile(`(?:\bexport\s+)?(const|let|var)\s*$`)
+	prefixDeclNoExportRE = regexp.MustCompile(`\b(const|let|var)\s*$`)
+	prefixCommaRE        = regexp.MustCompile(`,\s*$`)
+	suffixCommaRE        = regexp.MustCompile(`^[ \t]*,[ \t]*`)
+	suffixSemicolonRE    = regexp.MustCompile(`^[ \t]*;`)
+)
+
+func findVulnerableCodeSpan(contentStr, vulnerableCode string, lineStart, lineEnd int) (int, int) {
+	if lineStart > 0 {
+		lines := strings.Split(contentStr, "\n")
+		if lineStart <= len(lines) {
+			startOffset := 0
+			for i := 0; i < lineStart-1; i++ {
+				startOffset += len(lines[i]) + 1
+			}
+
+			endLine := lineEnd
+			if endLine < lineStart || endLine > len(lines) {
+				endLine = lineStart
+			}
+			endOffset := 0
+			for i := 0; i < endLine; i++ {
+				endOffset += len(lines[i])
+				if i < len(lines)-1 {
+					endOffset++
+				}
+			}
+
+			if endOffset < startOffset+len(vulnerableCode) {
+				endOffset = startOffset + len(vulnerableCode)
+			}
+			if endOffset > len(contentStr) {
+				endOffset = len(contentStr)
+			}
+
+			sub := contentStr[startOffset:endOffset]
+			if idx := strings.Index(sub, vulnerableCode); idx != -1 {
+				mStart := startOffset + idx
+				return mStart, mStart + len(vulnerableCode)
+			}
+		}
+	}
+
+	idx := strings.Index(contentStr, vulnerableCode)
+	if idx != -1 {
+		return idx, idx + len(vulnerableCode)
+	}
+
+	return -1, -1
+}
+
+func applySuggestedPatch(contentStr, vulnerableCode, suggestedPatch string, lineStart, lineEnd int) string {
+	if contentStr == "" || vulnerableCode == "" || suggestedPatch == "" {
+		return contentStr
+	}
+
+	matchStart, matchEnd := findVulnerableCodeSpan(contentStr, vulnerableCode, lineStart, lineEnd)
+	if matchStart == -1 || matchEnd == -1 {
+		return contentStr
+	}
+
+	cleanPatch := suggestedPatch
+
+	// If suggestedPatch starts with a declaration keyword (e.g. const, let, var),
+	// inspect the prefix immediately before matchStart.
+	// If the prefix ends with an existing declaration keyword, consume that keyword
+	// so we don't end up with duplicated keywords like "const const", "let const", or "var const".
+	patchHasDecl := patchDeclKeywordRE.MatchString(suggestedPatch)
+	var consumedKeyword string
+	if patchHasDecl {
+		prefix := contentStr[:matchStart]
+		patchHasExport := regexp.MustCompile(`^\s*export\b`).MatchString(suggestedPatch)
+
+		re := prefixDeclNoExportRE
+		if patchHasExport {
+			re = prefixDeclKeywordRE
+		}
+
+		if loc := re.FindStringSubmatchIndex(prefix); loc != nil {
+			if len(loc) >= 4 && loc[2] != -1 && loc[3] != -1 {
+				consumedKeyword = prefix[loc[2]:loc[3]]
+			}
+			cleanPatch = strings.TrimLeft(cleanPatch, " \t")
+			matchStart = loc[0]
+		} else if locComma := prefixCommaRE.FindStringIndex(prefix); locComma != nil {
+			// Compound declaration list: e.g. "const a = 1, AWS_SECRET_KEY = ..."
+			lineStartIdx := strings.LastIndex(prefix, "\n")
+			if lineStartIdx == -1 {
+				lineStartIdx = 0
+			} else {
+				lineStartIdx++
+			}
+			linePrefix := prefix[lineStartIdx:]
+			if kwMatches := regexp.MustCompile(`\b(const|let|var)\b`).FindAllString(linePrefix, -1); len(kwMatches) > 0 {
+				consumedKeyword = kwMatches[len(kwMatches)-1]
+			}
+			cleanPatch = ";\n" + strings.TrimLeft(cleanPatch, " \t")
+			matchStart = locComma[0]
+		} else {
+			// Check if the patch defines a variable that was declared on the immediately preceding line
+			patchDeclVarRE := regexp.MustCompile(`^\s*(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\b`)
+			if m := patchDeclVarRE.FindStringSubmatch(cleanPatch); len(m) > 1 {
+				varName := m[1]
+				declPattern := fmt.Sprintf(`(?m)^[ \t]*(?:const|let|var)\s+%s\b[^;\n]*;?[ \t]*\r?\n[ \t]*$`, regexp.QuoteMeta(varName))
+				if rePrecedingDecl, err := regexp.Compile(declPattern); err == nil {
+					if locDecl := rePrecedingDecl.FindStringIndex(prefix); locDecl != nil {
+						matchStart = locDecl[0]
+					}
+				}
+			}
+		}
+	}
+
+	// Suffix inspection:
+	suffix := contentStr[matchEnd:]
+
+	// If the declarator was followed by a comma in a compound declaration (e.g. "const AWS_SECRET_KEY = '...', b = 2;"),
+	// and we replaced it with a complete statement, convert the subsequent item into its own declaration.
+	if patchHasDecl {
+		if locComma := suffixCommaRE.FindStringIndex(suffix); locComma != nil {
+			declKW := consumedKeyword
+			if declKW == "" {
+				if m := patchDeclKeywordRE.FindStringSubmatch(suggestedPatch); len(m) > 1 {
+					declKW = m[1]
+				}
+			}
+			if declKW != "" {
+				matchEnd += locComma[1]
+				suffix = "\n" + declKW + " " + contentStr[matchEnd:]
+			}
+		}
+	}
+
+	// Check semicolon duplication
+	trimmedPatch := strings.TrimRight(cleanPatch, " \t\r\n")
+	patchHasSemi := strings.HasSuffix(trimmedPatch, ";")
+
+	if patchHasSemi {
+		if loc := suffixSemicolonRE.FindStringIndex(suffix); loc != nil {
+			matchEnd += loc[1]
+			suffix = contentStr[matchEnd:]
+		}
+	}
+
+	if strings.HasSuffix(cleanPatch, "\n") && (strings.HasPrefix(suffix, "\n") || strings.HasPrefix(suffix, "\r\n")) {
+		cleanPatch = strings.TrimRight(cleanPatch, "\r\n")
+	}
+
+	return contentStr[:matchStart] + cleanPatch + suffix
 }
 
 // NewPipelineHandler creates the main end-to-end task handler.
@@ -421,8 +578,8 @@ func NewPipelineHandler(
 				sandboxFiles := make(map[string]string)
 				for _, tf := range targetFiles {
 					contentStr := string(tf.Content)
-					if tf.Path == f.FilePath && suggestedPatch != "" && strings.Contains(contentStr, f.VulnerableCode) {
-						contentStr = strings.Replace(contentStr, f.VulnerableCode, suggestedPatch, 1)
+					if tf.Path == f.FilePath && suggestedPatch != "" {
+						contentStr = applySuggestedPatch(contentStr, f.VulnerableCode, suggestedPatch, f.LineStart, f.LineEnd)
 					}
 					sandboxFiles[tf.Path] = contentStr
 				}
@@ -440,17 +597,26 @@ func NewPipelineHandler(
 					Files:          sandboxFiles,
 				}
 				sbResult, err := sandboxClient.Detonate(ctx, sandboxReq)
-				if err != nil {
+				if err != nil || sbResult == nil {
 					logger.Warn("Sandbox verification skipped or offline", "error", err)
-				} else if sbResult.Status == "PASSED" {
+				} else if sbResult.Status == "PASSED" && sbResult.ExitCode == 0 && sbResult.NetworkEgressAttempts == 0 && sbResult.Runtime == "runsc" {
 					sandboxVerified = true
-					logger.Info("Sandbox verification confirmed patch validity", "vuln_id", vulnID)
+					logger.Info("Sandbox verification confirmed patch validity with gVisor runsc", "vuln_id", vulnID, "runtime", sbResult.Runtime)
 				} else {
-					logger.Warn("Sandbox verification did not confirm patch validity",
-						"vuln_id", vulnID,
-						"status", sbResult.Status,
-						"exit_code", sbResult.ExitCode,
-					)
+					if sbResult.Status == "PASSED" && sbResult.ExitCode == 0 && sbResult.NetworkEgressAttempts == 0 && sbResult.Runtime != "runsc" {
+						logger.Warn("Sandbox execution passed but runtime was not runsc; sandbox_verified invariant requires gVisor",
+							"vuln_id", vulnID,
+							"runtime", sbResult.Runtime,
+						)
+					} else {
+						logger.Warn("Sandbox verification did not confirm patch validity",
+							"vuln_id", vulnID,
+							"status", sbResult.Status,
+							"exit_code", sbResult.ExitCode,
+							"runtime", sbResult.Runtime,
+							"egress_attempts", sbResult.NetworkEgressAttempts,
+						)
+					}
 				}
 			}
 

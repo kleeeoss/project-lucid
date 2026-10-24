@@ -32,6 +32,7 @@ type SandboxResult struct {
 	Stdout                string `json:"stdout"`
 	Stderr                string `json:"stderr"`
 	NetworkEgressAttempts int    `json:"network_egress_attempts"`
+	Runtime               string `json:"runtime,omitempty"`
 }
 
 // SandboxClient defines the interface for executing dynamic detonation tests.

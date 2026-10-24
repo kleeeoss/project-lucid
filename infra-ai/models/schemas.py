@@ -128,3 +128,6 @@ class SandboxResult(BaseModel):
     network_egress_attempts: int = Field(
         default=0, ge=0, description="Count of blocked outbound network socket attempts"
     )
+    runtime: Optional[str] = Field(
+        default=None, description="Actual runtime used for execution (e.g. runsc, runc)"
+    )

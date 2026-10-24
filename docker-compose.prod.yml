@@ -118,16 +118,23 @@ services:
       - AWS_REGION=${AWS_REGION:-ap-southeast-2}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-southeast-2}
       - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-groq}
-      - LLM_FALLBACK_PROVIDER=${LLM_FALLBACK_PROVIDER:-gemini}
+      - LLM_FALLBACK_PROVIDER=${LLM_FALLBACK_PROVIDER:-vertexai}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-20b}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-global}
+      - VERTEX_AI_MODEL=${VERTEX_AI_MODEL:-gemini-3.5-flash-lite}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-/etc/lucid/gcp-credentials.json}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}
       - SANDBOX_IMAGE_TAG=lucid-sandbox-runner:latest
       - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runsc}
+      - SANDBOX_ALLOW_RUNTIME_FALLBACK=${SANDBOX_ALLOW_RUNTIME_FALLBACK:-false}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/lucid-sandboxes:/tmp/lucid-sandboxes
+      # Mount host GCP configuration directory (contains gcp-credentials.json or WIF credentials)
+      - ${GCP_CONFIG_DIR:-/var/lib/lucid/config}:/etc/lucid:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 5s

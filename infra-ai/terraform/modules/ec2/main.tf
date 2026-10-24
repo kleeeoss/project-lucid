@@ -47,6 +47,8 @@ resource "aws_instance" "host" {
     Environment        = var.environment
     Project            = "lucid-ci"
     DemoRuntimeMinutes = "120" # Initial default tag; updated by demo.sh prior to each start
+    SqsQueueUrl        = var.sqs_queue_url
+    GitRevision        = var.git_revision
   }
 }
 

@@ -34,4 +34,6 @@ module "ec2" {
   instance_profile_name = module.iam.instance_profile_name
   key_name              = var.key_name
   environment           = var.environment
+  sqs_queue_url         = module.sqs.queue_url
+  git_revision          = var.git_revision
 }

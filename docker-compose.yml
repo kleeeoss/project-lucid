@@ -63,16 +63,24 @@ services:
       - HOST=0.0.0.0
       - ENVIRONMENT=development
       - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-groq}
-      - LLM_FALLBACK_PROVIDER=${LLM_FALLBACK_PROVIDER:-gemini}
+      - LLM_FALLBACK_PROVIDER=${LLM_FALLBACK_PROVIDER:-vertexai}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-20b}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-global}
+      - VERTEX_AI_MODEL=${VERTEX_AI_MODEL:-gemini-3.5-flash-lite}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-/root/.config/gcloud/application_default_credentials.json}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}
       - SANDBOX_IMAGE_TAG=lucid-sandbox-runner:latest
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runsc}
+      - SANDBOX_ALLOW_RUNTIME_FALLBACK=${SANDBOX_ALLOW_RUNTIME_FALLBACK:-true}
     volumes:
       # Mount host docker socket so the orchestrator can launch runner containers
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/lucid-sandboxes:/tmp/lucid-sandboxes
+      # Mount host Google Cloud ADC for Vertex AI local authentication (read-only)
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
     depends_on:
       localstack:
         condition: service_healthy

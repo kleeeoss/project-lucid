@@ -36,3 +36,15 @@ variable "environment" {
   default     = "showcase"
   description = "Environment identifier tag"
 }
+
+variable "sqs_queue_url" {
+  type        = string
+  default     = ""
+  description = "URL of the primary SQS queue"
+}
+
+variable "git_revision" {
+  type        = string
+  default     = "main"
+  description = "Target Git branch, tag, or commit SHA to deploy (defaults to main)"
+}
