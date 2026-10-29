@@ -47,9 +47,9 @@ export default async function ScanDetailPage({ params }: { params: { id: string 
     const { scan, vulns } = data;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-5 px-6 py-5 max-w-7xl mx-auto w-full">
             {/* Top Breadcrumb & Metadata Header */}
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-5 backdrop-blur-md">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
                         <Link
@@ -57,23 +57,23 @@ export default async function ScanDetailPage({ params }: { params: { id: string 
                             className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-400 hover:text-white transition"
                         >
                             <ArrowLeft className="h-3.5 w-3.5" />
-                            Back to Scans Feed
+                            Back to Command Center
                         </Link>
 
                         <div className="mt-3 flex items-center gap-3">
                             <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
                                 <GitPullRequest className="h-5 w-5 text-sky-400" />
                                 {scan.repo_name || "acme/lucid-ci"}
-                                <span className="text-zinc-500 font-normal">/</span>
+                                <span className="text-zinc-600 font-normal">/</span>
                                 <span className="text-sky-400">PR #{scan.pr_number}</span>
                             </h1>
                             <StatusBadge status={scan.status} />
                         </div>
 
-                        <div className="mt-2 flex flex-wrap items-center gap-4 text-xs font-mono text-zinc-400">
-                            <span className="flex items-center gap-1.5 bg-zinc-800/60 px-2 py-0.5 rounded border border-zinc-700/50">
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-mono text-zinc-400">
+                            <span className="flex items-center gap-1.5 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
                                 <GitCommit className="h-3.5 w-3.5 text-zinc-500" />
-                                {scan.commit_sha.substring(0, 10)}
+                                {scan.commit_sha ? scan.commit_sha.substring(0, 10) : "—"}
                             </span>
                             <span>•</span>
                             <span className="flex items-center gap-1">
@@ -82,14 +82,14 @@ export default async function ScanDetailPage({ params }: { params: { id: string 
                             </span>
                             <span>•</span>
                             <span className="text-zinc-500">
-                                Detonated in Docker-on-EC2 with gVisor (<code className="text-emerald-400">runsc</code>)
+                                Detonated in gVisor sandbox (<code className="text-emerald-400">runsc</code>, <code className="text-zinc-400">--net none</code>)
                             </span>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
                         <div className="text-right">
-                            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 block">
+                            <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-zinc-500 block">
                                 Security Posture
                             </span>
                             <span className="text-sm font-semibold text-rose-400 flex items-center gap-1.5 justify-end">

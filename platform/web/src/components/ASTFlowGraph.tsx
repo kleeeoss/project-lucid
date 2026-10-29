@@ -42,31 +42,31 @@ interface LocalASTEdge {
     animated?: boolean;
 }
 
-// Cyber-Industrial Custom Node
+// Impeccable DevSecOps AST Node Card
 function CustomNode({ data }: { data: NodeData }) {
     const configs: Record<string, { border: string; bg: string; text: string; icon: React.ReactNode }> = {
         source: {
-            border: "border-emerald-500 shadow-emerald-500/10",
-            bg: "bg-emerald-950/40",
-            text: "text-emerald-400",
+            border: "border-amber-500/40 hover:border-amber-500/80 shadow-amber-500/5",
+            bg: "bg-amber-500/10",
+            text: "text-amber-400 border border-amber-500/20",
             icon: <Sparkles className="h-3 w-3" />,
         },
         propagator: {
-            border: "border-amber-500 shadow-amber-500/10",
-            bg: "bg-amber-950/40",
-            text: "text-amber-400",
+            border: "border-indigo-500/40 hover:border-indigo-500/80 shadow-indigo-500/5",
+            bg: "bg-indigo-500/10",
+            text: "text-indigo-400 border border-indigo-500/20",
             icon: <ArrowRight className="h-3 w-3" />,
         },
         sink: {
-            border: "border-rose-500 shadow-rose-500/20 ring-1 ring-rose-500/40",
-            bg: "bg-rose-950/40",
-            text: "text-rose-400",
+            border: "border-rose-500/60 hover:border-rose-500/90 shadow-rose-500/10 ring-1 ring-rose-500/40",
+            bg: "bg-rose-500/10",
+            text: "text-rose-400 border border-rose-500/20",
             icon: <AlertCircle className="h-3 w-3" />,
         },
         sanitizer: {
-            border: "border-sky-500 shadow-sky-500/10",
-            bg: "bg-sky-950/40",
-            text: "text-sky-400",
+            border: "border-emerald-500/40 hover:border-emerald-500/80 shadow-emerald-500/5",
+            bg: "bg-emerald-500/10",
+            text: "text-emerald-400 border border-emerald-500/20",
             icon: <CheckCircle2 className="h-3 w-3" />,
         },
     };
@@ -75,25 +75,27 @@ function CustomNode({ data }: { data: NodeData }) {
 
     return (
         <div
-            className={`w-72 rounded-xl border-2 p-3.5 shadow-2xl backdrop-blur-md transition-all bg-zinc-950/90 ${style.border}`}
+            className={`w-72 rounded-lg border p-3 shadow-xl backdrop-blur-md transition-all bg-zinc-950/95 ${style.border}`}
         >
-            <Handle type="target" position={Position.Top} className="!bg-zinc-500 !w-2 !h-2" />
-            <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider">
-                <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full ${style.bg} ${style.text}`}>
+            <Handle type="target" position={Position.Top} className="!bg-zinc-600 !w-2 !h-2 !border-none" />
+            <div className="flex items-center justify-between text-[10px] uppercase font-mono font-semibold tracking-wider">
+                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded ${style.bg} ${style.text}`}>
                     {style.icon}
                     {data.type}
                 </span>
-                <span className="font-mono text-zinc-500">L{data.line}</span>
+                <span className="font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded text-[10px]">
+                    L{data.line}
+                </span>
             </div>
 
-            <div className="mt-2 text-xs font-bold text-white font-mono truncate">{data.label}</div>
+            <div className="mt-2 text-xs font-semibold text-zinc-100 font-mono truncate">{data.label}</div>
 
             {data.codeSnippet && (
-                <pre className="mt-2 rounded-lg bg-black/80 border border-zinc-800/80 p-2 font-mono text-[11px] text-zinc-300 overflow-hidden text-ellipsis whitespace-nowrap">
+                <pre className="mt-2 rounded bg-black/90 border border-zinc-800/80 p-2 font-mono text-[11px] text-zinc-300 overflow-hidden text-ellipsis whitespace-nowrap">
                     <code>{data.codeSnippet}</code>
                 </pre>
             )}
-            <Handle type="source" position={Position.Bottom} className="!bg-zinc-500 !w-2 !h-2" />
+            <Handle type="source" position={Position.Bottom} className="!bg-zinc-600 !w-2 !h-2 !border-none" />
         </div>
     );
 }
@@ -122,14 +124,15 @@ function FlowCanvas({ vuln }: { vuln: Vulnerability }) {
                 },
             }));
 
+            // Smooth animated red edges (#ef4444) for security taint propagation
             const autoEdges: Edge[] = (rawGraph.edges || []).map((e: LocalASTEdge) => ({
                 id: e.id,
                 source: e.source,
                 target: e.target,
-                animated: e.animated ?? true,
-                style: { stroke: "#f59e0b", strokeWidth: 2 },
+                animated: true,
+                style: { stroke: "#ef4444", strokeWidth: 2 },
                 label: e.label,
-                labelStyle: { fill: "#f59e0b", fontSize: 10, fontFamily: "monospace" },
+                labelStyle: { fill: "#ef4444", fontSize: 10, fontFamily: "monospace" },
             }));
 
             return { nodes: autoNodes, edges: autoEdges };
@@ -146,35 +149,36 @@ function FlowCanvas({ vuln }: { vuln: Vulnerability }) {
         const targetNode = nodes[stepIdx];
         setCenter(targetNode.position.x + 140, targetNode.position.y + 50, {
             zoom: 1.15,
-            duration: 600,
+            duration: 500,
         });
     };
 
     if (nodes.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center h-[420px] w-full rounded-xl border border-zinc-800 bg-[#090b10] p-6 text-center">
+            <div className="flex flex-col items-center justify-center h-[440px] w-full rounded-lg border border-zinc-800 bg-[#09090b] p-6 text-center">
                 <Network className="h-8 w-8 text-zinc-600 mb-2" />
-                <p className="text-sm font-semibold text-zinc-300">AST Taint Trace Unavailable</p>
+                <p className="text-sm font-semibold text-zinc-200">AST Taint Trace Unavailable</p>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-                    Static engine identified this finding via pattern analysis; no structured AST taint dataflow graph was recorded for this rule.
+                    Static engine flagged this finding via pattern rules; no structured AST taint dataflow graph was recorded.
                 </p>
             </div>
         );
     }
 
     return (
-        <div className="relative h-[480px] w-full rounded-xl border border-zinc-800 bg-[#090b10] overflow-hidden">
+        <div className="relative h-[480px] w-full rounded-lg border border-zinc-800 bg-[#09090b] overflow-hidden">
             {/* Top Floating Taint Execution Stepper */}
-            <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-zinc-950/80 backdrop-blur-md border border-zinc-800 p-1.5 rounded-lg text-xs font-mono">
+            <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-1.5 rounded-md text-xs font-mono shadow-md">
                 <span className="px-2 text-zinc-400 font-semibold uppercase text-[10px]">Taint Path:</span>
                 {nodes.map((n: Node, idx: number) => (
                     <button
                         key={n.id}
                         onClick={() => handleStep(idx)}
-                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${currentStep === idx
-                            ? "bg-zinc-700 text-white shadow-sm border border-zinc-600"
-                            : "text-zinc-500 hover:text-zinc-300"
-                            }`}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                            currentStep === idx
+                                ? "bg-zinc-800 text-white shadow-sm border border-zinc-700"
+                                : "text-zinc-500 hover:text-zinc-300"
+                        }`}
                     >
                         Step {idx + 1}
                     </button>
@@ -182,16 +186,17 @@ function FlowCanvas({ vuln }: { vuln: Vulnerability }) {
             </div>
 
             <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView attributionPosition="bottom-right">
-                <Background color="#1e2433" gap={20} size={1} />
-                <Controls className="!bg-zinc-900 !border-zinc-800 !text-white" />
+                <Background color="#18181b" gap={20} size={1} />
+                <Controls className="!bg-zinc-900 !border-zinc-800 !text-zinc-300 rounded-md overflow-hidden" />
                 <MiniMap
                     nodeColor={(n: Node) => {
                         const nodeData = n.data as unknown as NodeData | undefined;
-                        if (nodeData?.type === "source") return "#10b981";
-                        if (nodeData?.type === "sink") return "#f43f5e";
-                        return "#f59e0b";
+                        if (nodeData?.type === "source") return "#f59e0b";
+                        if (nodeData?.type === "sink") return "#ef4444";
+                        if (nodeData?.type === "sanitizer") return "#10b981";
+                        return "#6366f1";
                     }}
-                    maskColor="rgba(9, 11, 16, 0.85)"
+                    maskColor="rgba(9, 9, 11, 0.85)"
                     className="!bg-zinc-950 !border !border-zinc-800 rounded-lg overflow-hidden"
                 />
             </ReactFlow>

@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 
 const connectionString =
-    process.env.DATABASE_URL || "postgres://lucid_user:lucid_password@localhost:5433/lucid_ci";
+    process.env.DATABASE_URL || "postgres://lucid:lucid_dev@localhost:5432/lucid_ci";
 
 // Singleton pool pattern for Next.js hot-reloading
 const globalForPg = globalThis as unknown as { pgPool: Pool };

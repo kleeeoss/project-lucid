@@ -16,4 +16,6 @@ var jsEntries = []CatalogEntry{
 	{Name: "escape", Category: CategorySanitizer, Language: "javascript"},
 	{Name: "sanitize", Category: CategorySanitizer, Language: "javascript"},
 	{Name: "path.resolve", Category: CategorySanitizer, Language: "javascript"},
+	{Name: "path.normalize", Category: CategorySanitizer, Language: "javascript"},
+	{Name: "sql`", Category: CategorySanitizer, Language: "javascript"},
 }

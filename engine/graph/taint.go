@@ -106,12 +106,45 @@ func isSanitized(n Node, catalog SecurityCatalog) bool {
 	return catalog.IsSanitizer(n) || catalog.ContainsSanitizer(n.Name) || catalog.ContainsSanitizer(n.CodeSnippet)
 }
 
+var (
+	quotedStringRE            = regexp.MustCompile("\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'|`(?:\\\\.|[^`\\\\])*`")
+	jsTemplateInterpolationRE = regexp.MustCompile(`\$\{([^}]+)\}`)
+	pyFStringGeneralRE       = regexp.MustCompile(`(?i)\bf(?:"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')`)
+	pyInsideFStringExprRE    = regexp.MustCompile(`\{([^}]+)\}`)
+)
+
 func firstReferencedTaint(code string, tainted map[string]taintState, assignment bool) (taintState, bool) {
 	if assignment {
 		code = expressionPortion(code)
 	}
-	code = quotedStringRE.ReplaceAllString(code, "")
-	vars := identifierRE.FindAllString(code, -1)
+
+	// 1. Detect variables interpolated in JavaScript template literals: `${var}`
+	for _, m := range jsTemplateInterpolationRE.FindAllStringSubmatch(code, -1) {
+		if len(m) > 1 {
+			for _, v := range identifierRE.FindAllString(m[1], -1) {
+				if state, ok := tainted[v]; ok {
+					return state, true
+				}
+			}
+		}
+	}
+
+	// 2. Detect variables interpolated in Python f-strings: `f"...{var}..."`
+	for _, fMatch := range pyFStringGeneralRE.FindAllString(code, -1) {
+		for _, m := range pyInsideFStringExprRE.FindAllStringSubmatch(fMatch, -1) {
+			if len(m) > 1 {
+				for _, v := range identifierRE.FindAllString(m[1], -1) {
+					if state, ok := tainted[v]; ok {
+						return state, true
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Strip all quoted string literals so variables mentioned in literal text are not falsely tainted
+	codeWithoutQuotes := quotedStringRE.ReplaceAllString(code, "")
+	vars := identifierRE.FindAllString(codeWithoutQuotes, -1)
 	for _, v := range vars {
 		if state, ok := tainted[v]; ok {
 			return state, true
@@ -148,5 +181,3 @@ func clamp(confidence float64) float64 {
 	}
 	return confidence
 }
-
-var quotedStringRE = regexp.MustCompile("\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'|`(?:\\\\.|[^`\\\\])*`")

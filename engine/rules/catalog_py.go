@@ -15,4 +15,6 @@ var pyEntries = []CatalogEntry{
 	{Name: "sanitize", Category: CategorySanitizer, Language: "python"},
 	{Name: "pathlib.Path.resolve", Category: CategorySanitizer, Language: "python"},
 	{Name: "os.path.abspath", Category: CategorySanitizer, Language: "python"},
+	{Name: "os.path.normpath", Category: CategorySanitizer, Language: "python"},
+	{Name: "shlex.quote", Category: CategorySanitizer, Language: "python"},
 }

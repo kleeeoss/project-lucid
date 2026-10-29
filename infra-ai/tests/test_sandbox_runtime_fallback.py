@@ -264,7 +264,9 @@ async def test_orchestrator_handles_early_preparation_failure_without_unbound_lo
         files={},
     )
 
-    with patch.object(mock_orchestrator, "_prepare_source_code", side_effect=OSError("Disk write error during source prep")):
+    mock_client = MagicMock()
+    with patch.object(mock_orchestrator, "_get_client", return_value=mock_client), \
+         patch.object(mock_orchestrator, "_prepare_source_code", side_effect=OSError("Disk write error during source prep")):
         result = await mock_orchestrator.detonate(req)
 
     assert result.status == "FAILED"
