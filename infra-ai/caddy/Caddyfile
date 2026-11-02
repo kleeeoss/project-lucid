@@ -22,12 +22,8 @@
         reverse_proxy ai-service:8000
     }
 
-    # Platform API & Inbound GitHub Webhooks -> Go Platform Server
+    # Inbound GitHub Webhooks -> Go Platform Server
     handle /webhook* {
-        reverse_proxy platform:8080
-    }
-
-    handle /api/* {
         reverse_proxy platform:8080
     }
 
@@ -35,7 +31,7 @@
         reverse_proxy platform:8080
     }
 
-    # Next.js Frontend Dashboard
+    # Next.js Frontend Dashboard & Web API Routes (/api/scan, etc.)
     handle /* {
         reverse_proxy dashboard:3000
     }
