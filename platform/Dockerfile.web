@@ -1,5 +1,29 @@
-# Multi-stage Dockerfile for Next.js Dashboard
-FROM node:20-alpine AS builder
+# Multi-stage Dockerfile for Next.js Dashboard & On-Demand Scanner
+# Stage 1: Build the Go scanner CLI binary with Tree-sitter CGO
+FROM golang:1.23-bookworm AS scanner-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libc-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY go.work go.work.sum* ./
+COPY engine/go.mod engine/go.sum* ./engine/
+COPY platform/go.mod platform/go.sum* ./platform/
+
+WORKDIR /app/engine
+RUN go mod download
+
+WORKDIR /app
+COPY engine/ ./engine/
+COPY platform/ ./platform/
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /bin/lucid-scan ./engine/cmd/scan/main.go
+
+# Stage 2: Build Next.js Dashboard
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -17,8 +41,14 @@ ENV NODE_ENV=production
 # Build the Next.js application
 RUN npm run build
 
-# Production runner image
-FROM node:20-alpine AS runner
+# Stage 3: Production runner image
+FROM node:20-bookworm-slim AS runner
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -35,6 +65,7 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
+COPY --from=scanner-builder /bin/lucid-scan /usr/local/bin/lucid-scan
 
 EXPOSE 3000
 
