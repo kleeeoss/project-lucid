@@ -82,26 +82,41 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        // Locate Go scanner (check compiled binary first, fallback to go run)
-        const projectRoot = path.resolve(process.cwd(), "../..");
-        const binaryPath = path.join(projectRoot, "engine", "bin", "lucid-scan");
+        // Locate Go scanner (check compiled binary candidates, PATH, then fallback to go run)
+        const candidatePaths = [
+            "/usr/local/bin/lucid-scan",
+            "/bin/lucid-scan",
+            path.resolve(process.cwd(), "engine/bin/lucid-scan"),
+            path.resolve(process.cwd(), "../../engine/bin/lucid-scan"),
+        ];
+        const binaryPath = candidatePaths.find((p) => fs.existsSync(p));
 
         let scanStdout = "[]";
-        if (fs.existsSync(binaryPath)) {
+        if (binaryPath) {
             const { stdout } = await execFileAsync(binaryPath, ["--json", tempDir], {
                 timeout: 30000,
             });
             scanStdout = stdout;
         } else {
-            const { stdout } = await execFileAsync(
-                "go",
-                ["run", "./engine/cmd/scan/main.go", "--json", tempDir],
-                {
-                    cwd: projectRoot,
-                    timeout: 45000,
-                }
-            );
-            scanStdout = stdout;
+            try {
+                // Check if lucid-scan is available in system PATH
+                const { stdout } = await execFileAsync("lucid-scan", ["--json", tempDir], {
+                    timeout: 30000,
+                });
+                scanStdout = stdout;
+            } catch {
+                // Fall back to go run for local development environments
+                const projectRoot = path.resolve(process.cwd(), "../..");
+                const { stdout } = await execFileAsync(
+                    "go",
+                    ["run", "./engine/cmd/scan/main.go", "--json", tempDir],
+                    {
+                        cwd: projectRoot,
+                        timeout: 45000,
+                    }
+                );
+                scanStdout = stdout;
+            }
         }
 
         let findings: any[] = [];
@@ -119,7 +134,10 @@ export async function POST(req: NextRequest) {
 
             // Attempt AI Remediation service if available
             try {
-                const aiRes = await fetch("http://localhost:8000/remediate", {
+                const aiBaseUrl =
+                    process.env.AI_SERVICE_URL ||
+                    (process.env.NODE_ENV === "production" ? "http://ai-service:8000" : "http://localhost:8000");
+                const aiRes = await fetch(`${aiBaseUrl}/remediate`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
