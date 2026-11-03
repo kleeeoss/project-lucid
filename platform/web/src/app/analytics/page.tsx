@@ -19,7 +19,7 @@ export default function AnalyticsPage() {
     const maxScans = Math.max(...weeklyData.map(d => d.scans));
 
     return (
-        <div className="space-y-6">
+        <div className="max-w-[1700px] w-full mx-auto px-6 2xl:px-8 py-6 space-y-6">
             <div>
                 <h1 className="text-headline-xl font-bold text-on-surface">Analytics</h1>
                 <p className="mt-1 text-body-md text-on-surface-variant">
@@ -62,14 +62,17 @@ export default function AnalyticsPage() {
             {/* Weekly scan volume chart */}
             <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low p-5">
                 <h2 className="text-headline-md font-semibold text-on-surface mb-4">Weekly Scan Volume</h2>
-                <div className="flex items-end gap-6 h-40">
+                <div className="flex items-end gap-6 h-48 w-full pt-6">
                     {weeklyData.map((week) => (
-                        <div key={week.week} className="flex-1 flex flex-col items-center gap-2">
+                        <div key={week.week} className="flex-1 flex flex-col items-center justify-end gap-2 h-full">
                             <span className="text-label-sm text-on-surface font-medium">{week.scans}</span>
-                            <div className="w-full rounded-t-md bg-primary/30 transition-all" style={{ height: `${(week.scans / maxScans) * 100}%` }}>
-                                <div className="w-full h-full rounded-t-md bg-gradient-to-t from-primary/60 to-primary" />
+                            <div className="w-full flex-1 flex items-end">
+                                <div
+                                    className="w-full rounded-t-md bg-gradient-to-t from-primary/60 to-primary hover:to-primary/80 transition-all cursor-pointer shadow-lg shadow-primary/10"
+                                    style={{ height: `${(week.scans / maxScans) * 100}%` }}
+                                />
                             </div>
-                            <span className="text-label-sm text-on-surface-variant">{week.week}</span>
+                            <span className="text-label-sm text-on-surface-variant font-mono">{week.week}</span>
                         </div>
                     ))}
                 </div>

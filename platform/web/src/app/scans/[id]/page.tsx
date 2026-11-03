@@ -47,7 +47,7 @@ export default async function ScanDetailPage({ params }: { params: { id: string 
     const { scan, vulns } = data;
 
     return (
-        <div className="space-y-5 px-6 py-5 max-w-7xl mx-auto w-full">
+        <div className="space-y-5 px-6 2xl:px-8 py-6 max-w-[1700px] mx-auto w-full">
             {/* Top Breadcrumb & Metadata Header */}
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-4">
@@ -65,7 +65,13 @@ export default async function ScanDetailPage({ params }: { params: { id: string 
                                 <GitPullRequest className="h-5 w-5 text-sky-400" />
                                 {scan.repo_name || "acme/lucid-ci"}
                                 <span className="text-zinc-600 font-normal">/</span>
-                                <span className="text-sky-400">PR #{scan.pr_number}</span>
+                                {scan.pr_number && scan.pr_number > 0 ? (
+                                    <span className="text-sky-400">PR #{scan.pr_number}</span>
+                                ) : (
+                                    <span className="px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-400 text-sm font-medium">
+                                        On-Demand Scan
+                                    </span>
+                                )}
                             </h1>
                             <StatusBadge status={scan.status} />
                         </div>

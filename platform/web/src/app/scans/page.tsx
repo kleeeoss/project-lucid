@@ -43,7 +43,7 @@ export default async function ScansPage() {
     const scans = await getScans();
 
     return (
-        <div className="space-y-5 px-6 py-5 max-w-7xl mx-auto w-full">
+        <div className="space-y-5 px-6 2xl:px-8 py-6 max-w-[1700px] mx-auto w-full">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-5">
                 <div>
                     <h1 className="text-xl font-semibold text-zinc-100 tracking-tight">Scan History</h1>
@@ -104,9 +104,15 @@ export default async function ScansPage() {
                                     <td className="px-4 py-2.5">
                                         <div className="flex items-center gap-2">
                                             <span className="font-medium text-zinc-200">{scan.repo_name || "lucid-ci"}</span>
-                                            <span className="rounded bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 text-[10px] text-sky-400">
-                                                #{scan.pr_number}
-                                            </span>
+                                            {scan.pr_number && scan.pr_number > 0 ? (
+                                                <span className="rounded bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 text-[10px] text-sky-400">
+                                                    #{scan.pr_number}
+                                                </span>
+                                            ) : (
+                                                <span className="rounded bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 text-[10px] text-sky-400 font-medium">
+                                                    On-Demand
+                                                </span>
+                                            )}
                                         </div>
                                     </td>
                                     <td className="px-4 py-2.5 text-zinc-400">

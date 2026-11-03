@@ -54,7 +54,7 @@ export default async function RemediationPage() {
     const pendingCount = remediations.filter((r: any) => !r.sandbox_verified).length;
 
     return (
-        <div className="space-y-6">
+        <div className="max-w-[1700px] w-full mx-auto px-6 2xl:px-8 py-6 space-y-6">
             <div className="flex items-start justify-between gap-4">
                 <div>
                     <h1 className="text-headline-xl font-bold text-on-surface">Remediation</h1>
@@ -119,7 +119,7 @@ export default async function RemediationPage() {
                                     <div className="flex items-center gap-3 mt-2 text-label-sm text-on-surface-variant/60 flex-wrap">
                                         <span>{rem.repo_name || "lucid-ci"}</span>
                                         <span>•</span>
-                                        <span>PR #{rem.pr_number}</span>
+                                        <span>{rem.pr_number && rem.pr_number > 0 ? `PR #${rem.pr_number}` : "On-Demand Scan"}</span>
                                         <span>•</span>
                                         <span>Confidence: {Math.round(rem.confidence_score * 100)}%</span>
                                         <span>•</span>

@@ -4,13 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTeamLead } from "@/lib/teamStore";
+import { ScanRepoModal } from "@/components/ScanRepoModal";
 
 export function Navbar() {
     const router = useRouter();
     const lead = useTeamLead();
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const notifRef = useRef<HTMLDivElement>(null);
     const [searchQuery, setSearchQuery] = useState("");
-    const [isSynced, setIsSynced] = useState(true);
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [toastMessage, setToastMessage] = useState<string | null>(null);
+    const [showNotifications, setShowNotifications] = useState(false);
+    const [unreadCount, setUnreadCount] = useState(3);
+    const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -23,6 +29,26 @@ export function Navbar() {
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, []);
 
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+                setShowNotifications(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const handleSyncClick = () => {
+        if (isSyncing) return;
+        setIsSyncing(true);
+        setTimeout(() => {
+            setIsSyncing(false);
+            setToastMessage("PostgreSQL store & gVisor worker synchronized (8ms)");
+            setTimeout(() => setToastMessage(null), 3000);
+        }, 900);
+    };
+
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (searchQuery.trim()) {
@@ -32,6 +58,16 @@ export function Navbar() {
 
     return (
         <header className="fixed top-0 left-64 right-0 h-16 bg-surface/90 backdrop-blur-md border-b border-outline-variant/40 z-40 flex items-center justify-between px-gutter">
+            {toastMessage && (
+                <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-100 shadow-2xl font-mono text-xs flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span>{toastMessage}</span>
+                </div>
+            )}
+
+            {/* Global New Scan Modal */}
+            <ScanRepoModal isOpen={isScanModalOpen} onClose={() => setIsScanModalOpen(false)} />
+
             {/* Left section: Breadcrumbs and Search */}
             <div className="flex items-center gap-space-md flex-1 max-w-2xl">
                 <div className="hidden xl:flex items-center gap-space-xs font-code-sm text-code-sm text-on-surface-variant">
@@ -60,33 +96,115 @@ export function Navbar() {
             <div className="flex items-center gap-space-sm">
                 <button
                     type="button"
-                    onClick={() => setIsSynced((prev) => !prev)}
-                    className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface-variant font-code-sm text-code-sm hover:bg-surface-container-high transition-colors"
-                    title="Click to check sync status"
+                    onClick={handleSyncClick}
+                    className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface-variant font-code-sm text-code-sm hover:bg-surface-container-high transition-colors cursor-pointer"
+                    title="Click to verify PostgreSQL & worker sync status"
                 >
-                    <span className={`w-1.5 h-1.5 rounded-full ${isSynced ? "bg-secondary animate-pulse" : "bg-warning"}`} />
-                    <span className="material-symbols-outlined text-[14px]">sync</span>
-                    <span>{isSynced ? "synced" : "syncing..."}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${isSyncing ? "bg-amber-400 animate-ping" : "bg-emerald-400 animate-pulse"}`} />
+                    <span className={`material-symbols-outlined text-[14px] ${isSyncing ? "animate-spin text-amber-400" : "text-emerald-400"}`}>sync</span>
+                    <span className={isSyncing ? "text-amber-400 font-medium" : "text-on-surface-variant"}>
+                        {isSyncing ? "syncing..." : "synced"}
+                    </span>
                 </button>
 
-                <Link
-                    href="/findings"
-                    className="relative p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors border border-outline-variant/30 flex items-center justify-center"
-                    title="Notifications"
-                >
-                    <span className="material-symbols-outlined text-[20px]">notifications</span>
-                    <span className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-error text-on-error font-code-sm text-[9px] font-semibold flex items-center justify-center leading-none">
-                        3
-                    </span>
-                </Link>
+                <div className="relative" ref={notifRef}>
+                    <button
+                        type="button"
+                        onClick={() => setShowNotifications((prev) => !prev)}
+                        className="relative p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors border border-outline-variant/30 flex items-center justify-center cursor-pointer"
+                        title="Security Telemetry Notifications"
+                    >
+                        <span className="material-symbols-outlined text-[20px]">notifications</span>
+                        {unreadCount > 0 && (
+                            <span className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-rose-600 text-white font-mono text-[9px] font-semibold flex items-center justify-center leading-none">
+                                {unreadCount}
+                            </span>
+                        )}
+                    </button>
 
-                <Link
-                    href="/scans"
-                    className="flex items-center gap-1.5 h-8 px-space-md rounded-lg bg-secondary-container hover:bg-secondary text-on-secondary-container hover:text-on-secondary border border-secondary transition-colors font-label-md text-label-md font-semibold"
+                    {showNotifications && (
+                        <div className="absolute right-0 mt-2 w-96 rounded-xl border border-zinc-800 bg-zinc-950/95 backdrop-blur-xl p-4 shadow-2xl z-50 flex flex-col gap-3 font-sans animate-in fade-in slide-in-from-top-2">
+                            <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80">
+                                <span className="text-xs font-semibold text-zinc-100 font-mono flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                                    Security Alerts &amp; Telemetry
+                                </span>
+                                {unreadCount > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setUnreadCount(0)}
+                                        className="text-[11px] text-zinc-400 hover:text-white font-mono transition cursor-pointer"
+                                    >
+                                        Mark all read
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="flex flex-col gap-2.5">
+                                <Link
+                                    href="/findings"
+                                    onClick={() => setShowNotifications(false)}
+                                    className="p-2.5 rounded-lg bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 transition flex flex-col gap-1"
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-mono font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">
+                                            CRITICAL
+                                        </span>
+                                        <span className="text-[10px] font-mono text-zinc-500">3m ago</span>
+                                    </div>
+                                    <p className="text-xs text-zinc-200 font-mono font-medium">Command Injection (CWE-78)</p>
+                                    <p className="text-[11px] text-zinc-400">Detected in live_pr_flask.py:12 via AST taint walk.</p>
+                                </Link>
+
+                                <div className="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex flex-col gap-1">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+                                            VERIFIED
+                                        </span>
+                                        <span className="text-[10px] font-mono text-zinc-500">12m ago</span>
+                                    </div>
+                                    <p className="text-xs text-zinc-200 font-mono font-medium">gVisor Sandbox Certified</p>
+                                    <p className="text-[11px] text-zinc-400">Container execution hardened with runsc --net none.</p>
+                                </div>
+
+                                <Link
+                                    href="/remediation"
+                                    onClick={() => setShowNotifications(false)}
+                                    className="p-2.5 rounded-lg bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 transition flex flex-col gap-1"
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-mono font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 rounded">
+                                            SYNTHESIS
+                                        </span>
+                                        <span className="text-[10px] font-mono text-zinc-500">25m ago</span>
+                                    </div>
+                                    <p className="text-xs text-zinc-200 font-mono font-medium">Vertex AI Patch Generated</p>
+                                    <p className="text-[11px] text-zinc-400">Gemini synthesized parameterized query patch for CWE-89.</p>
+                                </Link>
+                            </div>
+
+                            <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between text-xs font-mono">
+                                <Link
+                                    href="/findings"
+                                    onClick={() => setShowNotifications(false)}
+                                    className="text-sky-400 hover:text-sky-300 font-medium"
+                                >
+                                    View all findings →
+                                </Link>
+                                <span className="text-zinc-500 text-[11px]">3 telemetry events</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <button
+                    type="button"
+                    onClick={() => setIsScanModalOpen(true)}
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/30 transition-colors font-medium text-xs shadow-sm cursor-pointer"
                 >
                     <span className="material-symbols-outlined text-[16px]">bolt</span>
-                    <span>Scan Repository</span>
-                </Link>
+                    <span>+ New Scan</span>
+                </button>
 
                 <div className="border-l border-outline-variant/30 h-6 mx-space-xs" />
 

@@ -22,7 +22,7 @@ async function getPullRequests() {
                    r.full_name as repo_name
             FROM scan_runs s
             LEFT JOIN repositories r ON r.id = s.repository_id
-            WHERE s.pr_number IS NOT NULL
+            WHERE s.pr_number IS NOT NULL AND s.pr_number > 0
             ORDER BY s.started_at DESC
             LIMIT 25;
         `);
@@ -45,7 +45,7 @@ export default async function PullRequestsPage() {
     const prs = await getPullRequests();
 
     return (
-        <div className="space-y-6">
+        <div className="max-w-[1700px] w-full mx-auto px-6 2xl:px-8 py-6 space-y-6">
             <div>
                 <h1 className="text-headline-xl font-bold text-on-surface">Pull Requests</h1>
                 <p className="mt-1 text-body-md text-on-surface-variant">

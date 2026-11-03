@@ -72,7 +72,7 @@ export function RepositoriesView({ repos }: RepositoriesViewProps) {
     };
 
     return (
-        <div className="space-y-6 max-w-7xl mx-auto w-full">
+        <div className="space-y-6 max-w-[1700px] w-full mx-auto px-6 2xl:px-8 py-6">
             {/* Quick Scan Public Repo Modal */}
             <ScanRepoModal
                 isOpen={isModalOpen}

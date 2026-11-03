@@ -94,17 +94,34 @@ export function DashboardView({
     const repoCount = propRepoCount;
     const openFindings = propOpenFindings;
     const criticalCount = propCriticalCount;
-    const weekScans = propWeekScans;
+
+    // Filter scans dynamically by active timeframe
+    const filteredByTime = React.useMemo(() => {
+        const now = Date.now();
+        const windowMs = timeframe === "24h" ? 86400000 : timeframe === "7d" ? 7 * 86400000 : 30 * 86400000;
+        return (initialScans || []).filter((s) => {
+            if (!s.started_at) return true;
+            return (now - new Date(s.started_at).getTime()) <= windowMs;
+        });
+    }, [initialScans, timeframe]);
+
+    const activeScansCount = filteredByTime.length;
+    const activeFindings = filteredByTime.reduce((sum, s) => sum + (s.findings_count || 0), 0);
+    const activeCritical = filteredByTime.filter((s) => (s.findings_count || 0) > 0 && s.status === "COMPLETED").length;
 
     // Security score calculation
-    const securityScore = openFindings === 0 ? 100 : Math.max(50, 100 - criticalCount * 15 - (openFindings - criticalCount) * 2);
+    const securityScore = activeFindings === 0 ? 100 : Math.max(50, 100 - activeCritical * 15 - (activeFindings - activeCritical) * 2);
     const circumference = 314.159;
     const gaugeOffset = circumference * (1 - securityScore / 100);
 
-    const mappedScans = (initialScans || []).map((s) => ({
+    const mappedScans = filteredByTime.map((s) => ({
         id: s.id,
         repo: s.repo_name || "lucid-ci",
-        pr: s.pr_number ? `PR #${s.pr_number}` : s.commit_sha ? s.commit_sha.substring(0, 8) : "main",
+        pr: s.pr_number && s.pr_number > 0
+            ? `PR #${s.pr_number}`
+            : s.commit_sha
+            ? `HEAD (${s.commit_sha.substring(0, 7)})`
+            : "On-Demand",
         status: s.status,
         statusType: s.status === "COMPLETED" ? "passed" : s.status === "FAILED" ? "failed" : "running",
         findings: `${s.findings_count} ${s.findings_count === 1 ? "finding" : "findings"}`,
@@ -194,7 +211,7 @@ export function DashboardView({
                 </div>
             )}
 
-            <div className="px-6 py-5 flex flex-col gap-5 max-w-7xl mx-auto w-full">
+            <div className="max-w-[1700px] w-full mx-auto px-6 2xl:px-8 py-6 flex flex-col gap-6">
                 {/* Header Context & Quick Actions */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-zinc-800/80 pb-5">
                     <div className="flex flex-col gap-1">
@@ -354,11 +371,11 @@ export function DashboardView({
                         </div>
                         <div className="flex items-baseline gap-2">
                             <span className="font-mono text-2xl font-bold text-zinc-100">
-                                {openFindings}
+                                {activeFindings}
                             </span>
-                            {criticalCount > 0 ? (
+                            {activeCritical > 0 ? (
                                 <span className="font-mono text-[10px] text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20 font-semibold">
-                                    {criticalCount} Critical
+                                    {activeCritical} Critical
                                 </span>
                             ) : (
                                 <span className="font-mono text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
@@ -425,17 +442,17 @@ export function DashboardView({
                             <div className="flex flex-col gap-2 w-full text-xs font-mono">
                                 <div className="flex items-center justify-between border-b border-zinc-800/80 pb-1.5">
                                     <span className="text-zinc-400">Critical Risks:</span>
-                                    <span className="text-rose-400 font-bold">{criticalCount}</span>
+                                    <span className="text-rose-400 font-bold">{activeCritical}</span>
                                 </div>
                                 <div className="flex items-center justify-between border-b border-zinc-800/80 pb-1.5">
                                     <span className="text-zinc-400">Total Scans:</span>
-                                    <span className="text-zinc-200">{propStats.totalScans}</span>
+                                    <span className="text-zinc-200">{activeScansCount}</span>
                                 </div>
                                 <div className="flex items-center justify-between">
                                     <span className="text-zinc-400">Clean Rate:</span>
                                     <span className="text-emerald-400">
-                                        {propStats.totalScans > 0
-                                            ? `${Math.round(((propStats.totalScans - criticalCount) / propStats.totalScans) * 100)}%`
+                                        {activeScansCount > 0
+                                            ? `${Math.round(((activeScansCount - activeCritical) / activeScansCount) * 100)}%`
                                             : "100%"}
                                     </span>
                                 </div>
@@ -646,9 +663,16 @@ export function DashboardView({
                                         >
                                             <div className="flex items-start justify-between gap-2">
                                                 <div>
-                                                    <span className="font-semibold text-xs text-zinc-200 font-mono">
-                                                        PR #{pr.pr_number} • {pr.commit_sha.substring(0, 8)}
-                                                    </span>
+                                                    {pr.pr_number && pr.pr_number > 0 ? (
+                                                        <span className="font-semibold text-xs text-zinc-200 font-mono">
+                                                            PR #{pr.pr_number} • {pr.commit_sha ? pr.commit_sha.substring(0, 8) : "HEAD"}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="font-semibold text-xs text-sky-400 font-mono flex items-center gap-1.5">
+                                                            <span className="px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-[10px]">On-Demand</span>
+                                                            <span>HEAD • {pr.commit_sha ? pr.commit_sha.substring(0, 8) : "HEAD"}</span>
+                                                        </span>
+                                                    )}
                                                     <div className="text-[11px] text-zinc-500 font-mono">
                                                         {pr.repo_name} • {timeAgo(pr.completed_at)}
                                                     </div>

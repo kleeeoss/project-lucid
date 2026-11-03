@@ -49,7 +49,7 @@ export default async function FindingsPage() {
     const findings = await getFindings();
 
     return (
-        <div className="space-y-5 px-6 py-5 max-w-7xl mx-auto w-full">
+        <div className="space-y-5 px-6 2xl:px-8 py-6 max-w-[1700px] mx-auto w-full">
             <div className="border-b border-zinc-800/80 pb-5">
                 <h1 className="text-xl font-semibold text-zinc-100 tracking-tight">Vulnerability Findings</h1>
                 <p className="mt-1 text-xs text-zinc-400">
@@ -125,7 +125,7 @@ export default async function FindingsPage() {
                                             <span>•</span>
                                             <span>{finding.repo_name}</span>
                                             <span>•</span>
-                                            <span>PR #{finding.pr_number}</span>
+                                            <span>{finding.pr_number && finding.pr_number > 0 ? `PR #${finding.pr_number}` : "On-Demand Scan"}</span>
                                             <span>•</span>
                                             <span>{timeAgo(finding.created_at)}</span>
                                             <span>•</span>
