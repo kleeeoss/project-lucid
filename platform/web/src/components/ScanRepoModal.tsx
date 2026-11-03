@@ -1,7 +1,8 @@
 // src/components/ScanRepoModal.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
     Terminal,
@@ -23,19 +24,36 @@ interface ScanRepoModalProps {
 
 export function ScanRepoModal({ isOpen, onClose, initialUrl = "" }: ScanRepoModalProps) {
     const router = useRouter();
+    const [mounted, setMounted] = useState(false);
     const [repoUrl, setRepoUrl] = useState(initialUrl);
     const [branch, setBranch] = useState("main");
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [progressStep, setProgressStep] = useState<string>("");
 
-    React.useEffect(() => {
+    useEffect(() => {
+        setMounted(true);
+    }, []);
+
+    useEffect(() => {
         if (initialUrl) {
             setRepoUrl(initialUrl);
         }
     }, [initialUrl]);
 
-    if (!isOpen) return null;
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape" && !isLoading) {
+                onClose();
+            }
+        };
+        if (isOpen) {
+            window.addEventListener("keydown", handleKeyDown);
+        }
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [isOpen, isLoading, onClose]);
+
+    if (!isOpen || !mounted) return null;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -88,7 +106,7 @@ export function ScanRepoModal({ isOpen, onClose, initialUrl = "" }: ScanRepoModa
         }
     };
 
-    return (
+    const modalContent = (
         <div
             className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
             onClick={() => !isLoading && onClose()}
@@ -209,4 +227,6 @@ export function ScanRepoModal({ isOpen, onClose, initialUrl = "" }: ScanRepoModa
             </div>
         </div>
     );
+
+    return createPortal(modalContent, document.body);
 }

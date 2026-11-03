@@ -57,18 +57,16 @@ export function Navbar() {
     };
 
     return (
-        <header className="fixed top-0 left-64 right-0 h-16 bg-surface/90 backdrop-blur-md border-b border-outline-variant/40 z-40 flex items-center justify-between px-gutter">
-            {toastMessage && (
-                <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-100 shadow-2xl font-mono text-xs flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                    <span>{toastMessage}</span>
-                </div>
-            )}
+        <>
+            <header className="fixed top-0 left-64 right-0 h-16 bg-surface/90 backdrop-blur-md border-b border-outline-variant/40 z-40 flex items-center justify-between px-gutter">
+                {toastMessage && (
+                    <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-100 shadow-2xl font-mono text-xs flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <span>{toastMessage}</span>
+                    </div>
+                )}
 
-            {/* Global New Scan Modal */}
-            <ScanRepoModal isOpen={isScanModalOpen} onClose={() => setIsScanModalOpen(false)} />
-
-            {/* Left section: Breadcrumbs and Search */}
+                {/* Left section: Breadcrumbs and Search */}
             <div className="flex items-center gap-space-md flex-1 max-w-2xl">
                 <div className="hidden xl:flex items-center gap-space-xs font-code-sm text-code-sm text-on-surface-variant">
                     <span className="material-symbols-outlined text-[16px]">corporate_fare</span>
@@ -215,5 +213,9 @@ export function Navbar() {
                 </Link>
             </div>
         </header>
-    );
+
+        {/* Global New Scan Modal */}
+        <ScanRepoModal isOpen={isScanModalOpen} onClose={() => setIsScanModalOpen(false)} />
+    </>
+);
 }
