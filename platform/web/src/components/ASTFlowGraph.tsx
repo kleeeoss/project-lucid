@@ -18,55 +18,42 @@ import "@xyflow/react/dist/style.css";
 import { AlertCircle, ArrowRight, Sparkles, CheckCircle2, Network } from "lucide-react";
 import { Vulnerability } from "@/lib/types";
 
-interface NodeData {
+interface NodeData extends Record<string, unknown> {
     type: "source" | "propagator" | "sink" | "sanitizer";
     label: string;
     line: number;
     codeSnippet?: string;
-}
-
-interface LocalASTNode {
-    id: string;
-    type: "source" | "propagator" | "sink" | "sanitizer";
-    label: string;
-    line: number;
-    column?: number;
-    codeSnippet?: string;
-}
-
-interface LocalASTEdge {
-    id: string;
-    source: string;
-    target: string;
-    label?: string;
-    animated?: boolean;
 }
 
 // Impeccable DevSecOps AST Node Card
 function CustomNode({ data }: { data: NodeData }) {
-    const configs: Record<string, { border: string; bg: string; text: string; icon: React.ReactNode }> = {
+    const configs: Record<string, { border: string; bg: string; text: string; label: string; icon: React.ReactNode }> = {
         source: {
             border: "border-amber-500/40 hover:border-amber-500/80 shadow-amber-500/5",
             bg: "bg-amber-500/10",
             text: "text-amber-400 border border-amber-500/20",
+            label: "SOURCE",
             icon: <Sparkles className="h-3 w-3" />,
         },
         propagator: {
             border: "border-indigo-500/40 hover:border-indigo-500/80 shadow-indigo-500/5",
             bg: "bg-indigo-500/10",
             text: "text-indigo-400 border border-indigo-500/20",
+            label: "TAINT",
             icon: <ArrowRight className="h-3 w-3" />,
         },
         sink: {
             border: "border-rose-500/60 hover:border-rose-500/90 shadow-rose-500/10 ring-1 ring-rose-500/40",
             bg: "bg-rose-500/10",
             text: "text-rose-400 border border-rose-500/20",
+            label: "SINK",
             icon: <AlertCircle className="h-3 w-3" />,
         },
         sanitizer: {
             border: "border-emerald-500/40 hover:border-emerald-500/80 shadow-emerald-500/5",
             bg: "bg-emerald-500/10",
             text: "text-emerald-400 border border-emerald-500/20",
+            label: "SANITIZER",
             icon: <CheckCircle2 className="h-3 w-3" />,
         },
     };
@@ -81,17 +68,17 @@ function CustomNode({ data }: { data: NodeData }) {
             <div className="flex items-center justify-between text-[10px] uppercase font-mono font-semibold tracking-wider">
                 <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded ${style.bg} ${style.text}`}>
                     {style.icon}
-                    {data.type}
+                    {style.label}
                 </span>
                 <span className="font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded text-[10px]">
                     L{data.line}
                 </span>
             </div>
 
-            <div className="mt-2 text-xs font-semibold text-zinc-100 font-mono truncate">{data.label}</div>
+            <div className="mt-1 text-xs font-semibold text-zinc-100 font-mono truncate">{data.label}</div>
 
             {data.codeSnippet && (
-                <pre className="mt-2 rounded bg-black/90 border border-zinc-800/80 p-2 font-mono text-[11px] text-zinc-300 overflow-hidden text-ellipsis whitespace-nowrap">
+                <pre className="mt-2 rounded bg-black/90 border border-zinc-800 p-2 font-mono text-[11px] text-zinc-300 overflow-hidden text-ellipsis whitespace-nowrap">
                     <code>{data.codeSnippet}</code>
                 </pre>
             )}
@@ -109,23 +96,45 @@ function FlowCanvas({ vuln }: { vuln: Vulnerability }) {
 
     // Compute Layout with explicit typing
     const { nodes, edges } = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
-        const rawGraph = vuln.ast_graph_json as { nodes?: LocalASTNode[]; edges?: LocalASTEdge[] } | null | undefined;
+        const rawGraph = vuln.ast_graph_json as { nodes?: any[]; edges?: any[] } | null | undefined;
 
         if (rawGraph && rawGraph.nodes && rawGraph.nodes.length > 0) {
-            const autoNodes: Node[] = rawGraph.nodes.map((n: LocalASTNode, idx: number) => ({
-                id: n.id,
-                type: "custom",
-                position: { x: 200, y: idx * 140 + 30 },
-                data: {
-                    type: n.type,
-                    label: n.label,
-                    line: n.line,
-                    codeSnippet: n.codeSnippet,
-                },
-            }));
+            const autoNodes: Node[] = rawGraph.nodes.map((n: any, idx: number) => {
+                const d = n.data || {};
+                const rawType = String(n.type || d.nodeType || "astNode").toLowerCase();
+
+                let normalizedType: "source" | "propagator" | "sink" | "sanitizer" = "propagator";
+                if (rawType.includes("source")) normalizedType = "source";
+                else if (rawType.includes("sink")) normalizedType = "sink";
+                else if (rawType.includes("sanitiz")) normalizedType = "sanitizer";
+
+                // Use Go's computed 2D layout if present, otherwise stagger
+                const posX =
+                    typeof n.position?.x === "number" && (n.position.x !== 0 || n.position.y !== 0)
+                        ? n.position.x
+                        : idx % 2 === 0
+                        ? 120
+                        : 280;
+                const posY =
+                    typeof n.position?.y === "number" && (n.position.x !== 0 || n.position.y !== 0)
+                        ? n.position.y
+                        : idx * 150 + 30;
+
+                return {
+                    id: n.id,
+                    type: "custom",
+                    position: { x: posX, y: posY },
+                    data: {
+                        type: normalizedType,
+                        label: d.label || n.label || d.nodeType || n.id,
+                        line: d.line ?? n.line ?? 1,
+                        codeSnippet: d.codeSnippet || n.codeSnippet || "",
+                    },
+                };
+            });
 
             // Smooth animated red edges (#ef4444) for security taint propagation
-            const autoEdges: Edge[] = (rawGraph.edges || []).map((e: LocalASTEdge) => ({
+            const autoEdges: Edge[] = (rawGraph.edges || []).map((e: any) => ({
                 id: e.id,
                 source: e.source,
                 target: e.target,
